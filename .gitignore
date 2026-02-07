@@ -48,5 +48,4 @@ venv/
 .ruff_cache/
 .ipynb_checkpoints/
 .env
-stuff_plus_model2020_2025_2.pkl
 *.db
