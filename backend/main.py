@@ -1,0 +1,487 @@
+"""
+Developing Baseball – Stuff+ Backend API
+==========================================
+FastAPI server with:
+  • Stuff+ prediction (same model as BPC Portal)
+  • User authentication (signup / login with JWT)
+  • Per-user pitch storage (SQLite)
+
+Usage:
+    uvicorn main:app --host 0.0.0.0 --port 8000 --reload
+"""
+
+from fastapi import FastAPI, HTTPException, Depends, status
+from fastapi.middleware.cors import CORSMiddleware
+from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
+from pydantic import BaseModel, Field
+from typing import Optional
+import numpy as np
+import dill
+import os
+import sys
+import sqlite3
+import json
+import uuid
+from datetime import datetime, timedelta, timezone
+from contextlib import contextmanager
+
+from jose import jwt, JWTError
+import bcrypt
+
+# ---------------------------------------------------------------------------
+# Setup
+# ---------------------------------------------------------------------------
+
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from modeling.aStuffPlusModel2 import aStuffPlusModel
+
+JWT_SECRET = os.environ.get("JWT_SECRET", "dev-secret-change-in-production-abc123")
+JWT_ALGORITHM = "HS256"
+JWT_EXPIRE_DAYS = 90
+
+security = HTTPBearer()
+
+
+def hash_password(password: str) -> str:
+    return bcrypt.hashpw(password.encode("utf-8"), bcrypt.gensalt()).decode("utf-8")
+
+
+def verify_password(password: str, hashed: str) -> bool:
+    return bcrypt.checkpw(password.encode("utf-8"), hashed.encode("utf-8"))
+
+DB_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "livedata.db")
+
+app = FastAPI(
+    title="Developing Baseball API",
+    description="Stuff+ predictions, user auth, and pitch storage",
+    version="2.0.0",
+)
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+# ---------------------------------------------------------------------------
+# Database
+# ---------------------------------------------------------------------------
+
+def init_db():
+    """Create tables if they don't exist."""
+    with get_db() as conn:
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS users (
+                id TEXT PRIMARY KEY,
+                email TEXT UNIQUE NOT NULL,
+                name TEXT NOT NULL,
+                password_hash TEXT NOT NULL,
+                created_at TEXT NOT NULL
+            )
+        """)
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS pitches (
+                id TEXT PRIMARY KEY,
+                user_id TEXT NOT NULL,
+                pitch_type TEXT NOT NULL,
+                pitch_speed REAL,
+                induced_vert_break REAL,
+                horz_break REAL,
+                release_height REAL,
+                release_side REAL,
+                extension_ft REAL,
+                total_spin REAL,
+                tilt_string TEXT,
+                spin_axis REAL,
+                efficiency REAL,
+                active_spin REAL,
+                gyro REAL,
+                pitcher_hand TEXT,
+                stuff_plus REAL,
+                stuff_plus_raw REAL,
+                notes TEXT,
+                created_at TEXT NOT NULL,
+                FOREIGN KEY (user_id) REFERENCES users(id)
+            )
+        """)
+        conn.commit()
+
+
+@contextmanager
+def get_db():
+    conn = sqlite3.connect(DB_PATH)
+    conn.row_factory = sqlite3.Row
+    try:
+        yield conn
+    finally:
+        conn.close()
+
+
+# ---------------------------------------------------------------------------
+# Auth helpers
+# ---------------------------------------------------------------------------
+
+def create_token(user_id: str, email: str) -> str:
+    payload = {
+        "sub": user_id,
+        "email": email,
+        "exp": datetime.now(timezone.utc) + timedelta(days=JWT_EXPIRE_DAYS),
+    }
+    return jwt.encode(payload, JWT_SECRET, algorithm=JWT_ALGORITHM)
+
+
+def verify_token(credentials: HTTPAuthorizationCredentials = Depends(security)) -> dict:
+    try:
+        payload = jwt.decode(credentials.credentials, JWT_SECRET, algorithms=[JWT_ALGORITHM])
+        user_id = payload.get("sub")
+        if user_id is None:
+            raise HTTPException(status_code=401, detail="Invalid token")
+        return payload
+    except JWTError:
+        raise HTTPException(status_code=401, detail="Invalid or expired token")
+
+
+# ---------------------------------------------------------------------------
+# Stuff+ Model
+# ---------------------------------------------------------------------------
+
+MODEL_PATH = os.environ.get(
+    "STUFF_PLUS_MODEL_PATH",
+    os.path.join(os.path.dirname(__file__), "stuff_plus_model2020_2025_2.pkl"),
+)
+
+model_college = None
+
+
+def load_stuff_plus_model():
+    global model_college
+    if not os.path.exists(MODEL_PATH):
+        print(f"WARNING: Model file not found at {MODEL_PATH}")
+        return
+    dill._dill._reverse_typemap[
+        "modeling.aStuffPlusModel.aStuffPlusModel"
+    ] = "modeling.aStuffPlusModel2.aStuffPlusModel"
+    with open(MODEL_PATH, "rb") as f:
+        model_college = dill.load(f)
+    model_college.predict_single_pitch = aStuffPlusModel.predict_single_pitch.__get__(
+        model_college
+    )
+    print(f"Stuff+ model loaded from {MODEL_PATH}")
+
+
+def velocity_penalty(pitch_type: str, avg_velo: float, pfx_z_inches: float, stuff_val: float) -> tuple:
+    penalty = 0
+    capped_stuff = stuff_val
+    if pfx_z_inches > 17:
+        pitch_type = "FF"
+    fastball_types = ["FF", "SI"]
+    if pitch_type in fastball_types:
+        avg_mlb = 93
+        if avg_velo < avg_mlb:
+            penalty = avg_mlb - avg_velo
+        if avg_velo < 90:
+            capped_stuff = min(capped_stuff, 105)
+    elif pitch_type in ("CU", "KC", "ST"):
+        avg_mlb = 77
+        if avg_velo < avg_mlb:
+            penalty = (avg_mlb - avg_velo) * 1.0
+    elif pitch_type in ("SL", "FC"):
+        avg_mlb = 82
+        if avg_velo < avg_mlb:
+            penalty = (avg_mlb - avg_velo) * 1.0
+    elif pitch_type in ("CH", "SP", "FS"):
+        avg_mlb = 78
+        if avg_velo < avg_mlb:
+            penalty = (avg_mlb - avg_velo) * 1.0
+    penalty = min(30, penalty)
+    return capped_stuff - penalty, penalty
+
+
+# ---------------------------------------------------------------------------
+# Pydantic models
+# ---------------------------------------------------------------------------
+
+# Auth
+class SignupRequest(BaseModel):
+    email: str
+    name: str
+    password: str
+
+class LoginRequest(BaseModel):
+    email: str
+    password: str
+
+class AuthResponse(BaseModel):
+    token: str
+    user_id: str
+    email: str
+    name: str
+
+# Pitch prediction
+class PitchRequest(BaseModel):
+    pitch_type: str = Field(..., description="Pitch type code")
+    release_speed: float
+    pfx_x: float
+    pfx_z: float
+    release_extension: float
+    release_spin_rate: float
+    spin_axis: float
+    release_pos_x: float
+    release_pos_z: float
+    p_throws: str
+    fb_velo: float
+    fb_ivb: float
+    fb_hmov: float
+
+class PitchResponse(BaseModel):
+    stuff_plus: float
+    stuff_plus_raw: float
+    velocity_penalty: float
+
+# Saved pitch
+class SavePitchRequest(BaseModel):
+    pitch_type: str
+    pitch_speed: Optional[float] = None
+    induced_vert_break: Optional[float] = None
+    horz_break: Optional[float] = None
+    release_height: Optional[float] = None
+    release_side: Optional[float] = None
+    extension_ft: Optional[float] = None
+    total_spin: Optional[float] = None
+    tilt_string: Optional[str] = None
+    spin_axis: Optional[float] = None
+    efficiency: Optional[float] = None
+    active_spin: Optional[float] = None
+    gyro: Optional[float] = None
+    pitcher_hand: str = "R"
+    stuff_plus: Optional[float] = None
+    stuff_plus_raw: Optional[float] = None
+    notes: Optional[str] = None
+
+class SavedPitchResponse(BaseModel):
+    id: str
+    pitch_type: str
+    pitch_speed: Optional[float] = None
+    induced_vert_break: Optional[float] = None
+    horz_break: Optional[float] = None
+    release_height: Optional[float] = None
+    release_side: Optional[float] = None
+    extension_ft: Optional[float] = None
+    total_spin: Optional[float] = None
+    tilt_string: Optional[str] = None
+    spin_axis: Optional[float] = None
+    efficiency: Optional[float] = None
+    active_spin: Optional[float] = None
+    gyro: Optional[float] = None
+    pitcher_hand: str
+    stuff_plus: Optional[float] = None
+    stuff_plus_raw: Optional[float] = None
+    notes: Optional[str] = None
+    created_at: str
+
+
+# ---------------------------------------------------------------------------
+# Startup
+# ---------------------------------------------------------------------------
+
+@app.on_event("startup")
+async def startup_event():
+    init_db()
+    load_stuff_plus_model()
+
+
+# ---------------------------------------------------------------------------
+# Health
+# ---------------------------------------------------------------------------
+
+@app.get("/health")
+async def health_check():
+    return {"status": "healthy", "model_loaded": model_college is not None}
+
+
+# ---------------------------------------------------------------------------
+# Auth endpoints
+# ---------------------------------------------------------------------------
+
+@app.post("/auth/signup", response_model=AuthResponse)
+async def signup(req: SignupRequest):
+    if len(req.password) < 6:
+        raise HTTPException(status_code=400, detail="Password must be at least 6 characters")
+    if not req.email or "@" not in req.email:
+        raise HTTPException(status_code=400, detail="Invalid email address")
+
+    user_id = str(uuid.uuid4())
+    hashed = hash_password(req.password)
+    now = datetime.now(timezone.utc).isoformat()
+
+    with get_db() as conn:
+        existing = conn.execute("SELECT id FROM users WHERE email = ?", (req.email.lower(),)).fetchone()
+        if existing:
+            raise HTTPException(status_code=409, detail="An account with this email already exists")
+        conn.execute(
+            "INSERT INTO users (id, email, name, password_hash, created_at) VALUES (?, ?, ?, ?, ?)",
+            (user_id, req.email.lower(), req.name.strip(), hashed, now),
+        )
+        conn.commit()
+
+    token = create_token(user_id, req.email.lower())
+    return AuthResponse(token=token, user_id=user_id, email=req.email.lower(), name=req.name.strip())
+
+
+@app.post("/auth/login", response_model=AuthResponse)
+async def login(req: LoginRequest):
+    with get_db() as conn:
+        user = conn.execute(
+            "SELECT id, email, name, password_hash FROM users WHERE email = ?",
+            (req.email.lower(),),
+        ).fetchone()
+
+    if not user or not verify_password(req.password, user["password_hash"]):
+        raise HTTPException(status_code=401, detail="Invalid email or password")
+
+    token = create_token(user["id"], user["email"])
+    return AuthResponse(token=token, user_id=user["id"], email=user["email"], name=user["name"])
+
+
+@app.get("/auth/me")
+async def get_me(payload: dict = Depends(verify_token)):
+    with get_db() as conn:
+        user = conn.execute(
+            "SELECT id, email, name, created_at FROM users WHERE id = ?",
+            (payload["sub"],),
+        ).fetchone()
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found")
+    return {"user_id": user["id"], "email": user["email"], "name": user["name"]}
+
+
+# ---------------------------------------------------------------------------
+# Stuff+ prediction (no auth required — keeps existing behavior)
+# ---------------------------------------------------------------------------
+
+@app.post("/predict", response_model=PitchResponse)
+async def predict_stuff_plus(request: PitchRequest):
+    if model_college is None:
+        raise HTTPException(status_code=503, detail="Stuff+ model not loaded")
+    valid_types = {"FF", "SI", "FC", "SL", "CU", "CH", "ST", "FS", "KC"}
+    if request.pitch_type not in valid_types:
+        raise HTTPException(status_code=400, detail=f"Invalid pitch type '{request.pitch_type}'")
+    if request.p_throws not in ("R", "L"):
+        raise HTTPException(status_code=400, detail="p_throws must be 'R' or 'L'")
+    try:
+        raw_stuff = model_college.predict_single_pitch(
+            pitch_type=request.pitch_type,
+            release_speed=request.release_speed,
+            pfx_x=request.pfx_x,
+            pfx_z=request.pfx_z,
+            release_extension=request.release_extension,
+            release_spin_rate=request.release_spin_rate,
+            spin_axis=request.spin_axis,
+            release_pos_x=request.release_pos_x,
+            release_pos_z=request.release_pos_z,
+            p_throws=request.p_throws,
+            fb_velo=request.fb_velo,
+            fb_ivb=request.fb_ivb,
+            fb_hmov=request.fb_hmov,
+        )
+        pfx_z_inches = request.pfx_z * 12
+        adjusted_stuff, penalty = velocity_penalty(
+            request.pitch_type, request.release_speed, pfx_z_inches, raw_stuff
+        )
+        final_stuff = float(np.clip(adjusted_stuff, 60, 140))
+        return PitchResponse(
+            stuff_plus=round(final_stuff, 1),
+            stuff_plus_raw=round(raw_stuff, 1),
+            velocity_penalty=round(penalty, 1),
+        )
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Prediction failed: {str(e)}")
+
+
+# ---------------------------------------------------------------------------
+# Pitch storage (auth required)
+# ---------------------------------------------------------------------------
+
+@app.post("/pitches", response_model=SavedPitchResponse, status_code=201)
+async def save_pitch(req: SavePitchRequest, payload: dict = Depends(verify_token)):
+    pitch_id = str(uuid.uuid4())
+    now = datetime.now(timezone.utc).isoformat()
+    user_id = payload["sub"]
+
+    with get_db() as conn:
+        conn.execute(
+            """INSERT INTO pitches
+               (id, user_id, pitch_type, pitch_speed, induced_vert_break, horz_break,
+                release_height, release_side, extension_ft, total_spin, tilt_string,
+                spin_axis, efficiency, active_spin, gyro, pitcher_hand,
+                stuff_plus, stuff_plus_raw, notes, created_at)
+               VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+            (
+                pitch_id, user_id, req.pitch_type, req.pitch_speed,
+                req.induced_vert_break, req.horz_break, req.release_height,
+                req.release_side, req.extension_ft, req.total_spin,
+                req.tilt_string, req.spin_axis, req.efficiency, req.active_spin,
+                req.gyro, req.pitcher_hand, req.stuff_plus, req.stuff_plus_raw,
+                req.notes, now,
+            ),
+        )
+        conn.commit()
+
+    return SavedPitchResponse(
+        id=pitch_id, pitch_type=req.pitch_type, pitch_speed=req.pitch_speed,
+        induced_vert_break=req.induced_vert_break, horz_break=req.horz_break,
+        release_height=req.release_height, release_side=req.release_side,
+        extension_ft=req.extension_ft, total_spin=req.total_spin,
+        tilt_string=req.tilt_string, spin_axis=req.spin_axis,
+        efficiency=req.efficiency, active_spin=req.active_spin,
+        gyro=req.gyro, pitcher_hand=req.pitcher_hand,
+        stuff_plus=req.stuff_plus, stuff_plus_raw=req.stuff_plus_raw,
+        notes=req.notes, created_at=now,
+    )
+
+
+@app.get("/pitches", response_model=list[SavedPitchResponse])
+async def get_pitches(payload: dict = Depends(verify_token)):
+    user_id = payload["sub"]
+    with get_db() as conn:
+        rows = conn.execute(
+            "SELECT * FROM pitches WHERE user_id = ? ORDER BY created_at DESC", (user_id,)
+        ).fetchall()
+    return [
+        SavedPitchResponse(
+            id=r["id"], pitch_type=r["pitch_type"], pitch_speed=r["pitch_speed"],
+            induced_vert_break=r["induced_vert_break"], horz_break=r["horz_break"],
+            release_height=r["release_height"], release_side=r["release_side"],
+            extension_ft=r["extension_ft"], total_spin=r["total_spin"],
+            tilt_string=r["tilt_string"], spin_axis=r["spin_axis"],
+            efficiency=r["efficiency"], active_spin=r["active_spin"],
+            gyro=r["gyro"], pitcher_hand=r["pitcher_hand"],
+            stuff_plus=r["stuff_plus"], stuff_plus_raw=r["stuff_plus_raw"],
+            notes=r["notes"], created_at=r["created_at"],
+        )
+        for r in rows
+    ]
+
+
+@app.delete("/pitches/{pitch_id}", status_code=204)
+async def delete_pitch(pitch_id: str, payload: dict = Depends(verify_token)):
+    user_id = payload["sub"]
+    with get_db() as conn:
+        row = conn.execute(
+            "SELECT id FROM pitches WHERE id = ? AND user_id = ?", (pitch_id, user_id)
+        ).fetchone()
+        if not row:
+            raise HTTPException(status_code=404, detail="Pitch not found")
+        conn.execute("DELETE FROM pitches WHERE id = ? AND user_id = ?", (pitch_id, user_id))
+        conn.commit()
+
+
+# ---------------------------------------------------------------------------
+# Main
+# ---------------------------------------------------------------------------
+
+if __name__ == "__main__":
+    import uvicorn
+    uvicorn.run(app, host="0.0.0.0", port=8000)
