@@ -8,7 +8,7 @@ class StuffPlusService {
     #if DEBUG
     static var baseURL: String = "http://localhost:8000"
     #else
-    static var baseURL: String = "https://YOUR-BACKEND-URL.railway.app"  // TODO: Replace with real URL after deploying
+    static var baseURL: String = "https://trackman-scraper-production.up.railway.app"
     #endif
     
     static func calculateStuffPlus(for pitchData: PitchData) async throws -> StuffPlusResponse {
