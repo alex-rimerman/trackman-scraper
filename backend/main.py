@@ -10,7 +10,7 @@ Usage:
     uvicorn main:app --host 0.0.0.0 --port 8000 --reload
 """
 
-from fastapi import FastAPI, HTTPException, Depends, status
+from fastapi import FastAPI, HTTPException, Depends, status, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from pydantic import BaseModel, Field
@@ -27,6 +27,9 @@ from contextlib import contextmanager
 
 from jose import jwt, JWTError
 import bcrypt
+from slowapi import Limiter, _rate_limit_exceeded_handler
+from slowapi.util import get_remote_address
+from slowapi.errors import RateLimitExceeded
 
 # ---------------------------------------------------------------------------
 # Setup
@@ -36,10 +39,20 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from modeling.aStuffPlusModel2 import aStuffPlusModel
 
 JWT_SECRET = os.environ.get("JWT_SECRET", "dev-secret-change-in-production-abc123")
+if JWT_SECRET == "dev-secret-change-in-production-abc123":
+    import warnings
+    warnings.warn(
+        "WARNING: Using default JWT_SECRET! Set JWT_SECRET environment variable in production.",
+        RuntimeWarning
+    )
 JWT_ALGORITHM = "HS256"
 JWT_EXPIRE_DAYS = 90
 
+# CORS allowed origins
+ALLOWED_ORIGINS = os.environ.get("CORS_ORIGINS", "*").split(",")
+
 security = HTTPBearer()
+limiter = Limiter(key_func=get_remote_address, default_limits=["1000/hour"])
 
 
 def hash_password(password: str) -> str:
@@ -57,9 +70,12 @@ app = FastAPI(
     version="2.0.0",
 )
 
+app.state.limiter = limiter
+app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=ALLOWED_ORIGINS,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -306,7 +322,8 @@ async def health_check():
 # ---------------------------------------------------------------------------
 
 @app.post("/auth/signup", response_model=AuthResponse)
-async def signup(req: SignupRequest):
+@limiter.limit("5/hour")
+async def signup(request: Request, req: SignupRequest):
     if len(req.password) < 6:
         raise HTTPException(status_code=400, detail="Password must be at least 6 characters")
     if not req.email or "@" not in req.email:
@@ -331,7 +348,8 @@ async def signup(req: SignupRequest):
 
 
 @app.post("/auth/login", response_model=AuthResponse)
-async def login(req: LoginRequest):
+@limiter.limit("10/minute")
+async def login(request: Request, req: LoginRequest):
     with get_db() as conn:
         user = conn.execute(
             "SELECT id, email, name, password_hash FROM users WHERE email = ?",
@@ -362,33 +380,34 @@ async def get_me(payload: dict = Depends(verify_token)):
 # ---------------------------------------------------------------------------
 
 @app.post("/predict", response_model=PitchResponse)
-async def predict_stuff_plus(request: PitchRequest):
+@limiter.limit("100/hour")
+async def predict_stuff_plus(request: Request, pitch_request: PitchRequest):
     if model_college is None:
         raise HTTPException(status_code=503, detail="Stuff+ model not loaded")
     valid_types = {"FF", "SI", "FC", "SL", "CU", "CH", "ST", "FS", "KC"}
-    if request.pitch_type not in valid_types:
-        raise HTTPException(status_code=400, detail=f"Invalid pitch type '{request.pitch_type}'")
-    if request.p_throws not in ("R", "L"):
+    if pitch_request.pitch_type not in valid_types:
+        raise HTTPException(status_code=400, detail=f"Invalid pitch type '{pitch_request.pitch_type}'")
+    if pitch_request.p_throws not in ("R", "L"):
         raise HTTPException(status_code=400, detail="p_throws must be 'R' or 'L'")
     try:
         raw_stuff = model_college.predict_single_pitch(
-            pitch_type=request.pitch_type,
-            release_speed=request.release_speed,
-            pfx_x=request.pfx_x,
-            pfx_z=request.pfx_z,
-            release_extension=request.release_extension,
-            release_spin_rate=request.release_spin_rate,
-            spin_axis=request.spin_axis,
-            release_pos_x=request.release_pos_x,
-            release_pos_z=request.release_pos_z,
-            p_throws=request.p_throws,
-            fb_velo=request.fb_velo,
-            fb_ivb=request.fb_ivb,
-            fb_hmov=request.fb_hmov,
+            pitch_type=pitch_request.pitch_type,
+            release_speed=pitch_request.release_speed,
+            pfx_x=pitch_request.pfx_x,
+            pfx_z=pitch_request.pfx_z,
+            release_extension=pitch_request.release_extension,
+            release_spin_rate=pitch_request.release_spin_rate,
+            spin_axis=pitch_request.spin_axis,
+            release_pos_x=pitch_request.release_pos_x,
+            release_pos_z=pitch_request.release_pos_z,
+            p_throws=pitch_request.p_throws,
+            fb_velo=pitch_request.fb_velo,
+            fb_ivb=pitch_request.fb_ivb,
+            fb_hmov=pitch_request.fb_hmov,
         )
-        pfx_z_inches = request.pfx_z * 12
+        pfx_z_inches = pitch_request.pfx_z * 12
         adjusted_stuff, penalty = velocity_penalty(
-            request.pitch_type, request.release_speed, pfx_z_inches, raw_stuff
+            pitch_request.pitch_type, pitch_request.release_speed, pfx_z_inches, raw_stuff
         )
         final_stuff = float(np.clip(adjusted_stuff, 60, 140))
         return PitchResponse(
@@ -443,12 +462,28 @@ async def save_pitch(req: SavePitchRequest, payload: dict = Depends(verify_token
 
 
 @app.get("/pitches", response_model=list[SavedPitchResponse])
-async def get_pitches(payload: dict = Depends(verify_token)):
+async def get_pitches(
+    payload: dict = Depends(verify_token),
+    limit: int = 50,
+    offset: int = 0,
+    pitch_type: Optional[str] = None
+):
+    """Get user's pitches with pagination and filtering."""
     user_id = payload["sub"]
+    
+    # Build query with optional pitch_type filter
+    query = "SELECT * FROM pitches WHERE user_id = ?"
+    params = [user_id]
+    
+    if pitch_type:
+        query += " AND pitch_type = ?"
+        params.append(pitch_type.upper())
+    
+    query += " ORDER BY created_at DESC LIMIT ? OFFSET ?"
+    params.extend([limit, offset])
+    
     with get_db() as conn:
-        rows = conn.execute(
-            "SELECT * FROM pitches WHERE user_id = ? ORDER BY created_at DESC", (user_id,)
-        ).fetchall()
+        rows = conn.execute(query, params).fetchall()
     return [
         SavedPitchResponse(
             id=r["id"], pitch_type=r["pitch_type"], pitch_speed=r["pitch_speed"],

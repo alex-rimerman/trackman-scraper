@@ -27,6 +27,24 @@ struct ContentView: View {
                         .padding(.horizontal)
                         .padding(.top, 8)
                     
+                    // Success toast
+                    if let message = viewModel.saveSuccessMessage {
+                        HStack(spacing: 8) {
+                            Image(systemName: "checkmark.circle.fill")
+                                .foregroundColor(.green)
+                            Text(message)
+                                .font(.subheadline)
+                                .foregroundColor(.white)
+                            Spacer()
+                        }
+                        .padding(12)
+                        .background(Color.green.opacity(0.2))
+                        .cornerRadius(10)
+                        .padding(.horizontal, 16)
+                        .padding(.top, 8)
+                        .transition(.move(edge: .top).combined(with: .opacity))
+                    }
+                    
                     // Main content
                     TabView(selection: $viewModel.currentStep) {
                         CaptureView(viewModel: viewModel)

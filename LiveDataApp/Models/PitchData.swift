@@ -33,6 +33,9 @@ struct PitchData: Codable, Identifiable {
     var fastballIVB: Double?        // inches
     var fastballHB: Double?         // inches
     
+    // Notes
+    var notes: String?
+    
     init() {
         self.id = UUID()
     }
@@ -143,16 +146,19 @@ struct PitchData: Codable, Identifiable {
             .replacingOccurrences(of: "\u{201C}", with: "\"")  // smart quote
             .replacingOccurrences(of: "\u{201D}", with: "\"")  // smart quote
         
-        // Format: X'Y" (e.g. 5'4", -2'8")
+        // Format: X'Y" (e.g. 5'4", -2'8") or X' (e.g. 2', 6')
         if cleaned.contains("'") {
             let stripped = cleaned.replacingOccurrences(of: "\"", with: "")
             let parts = stripped.split(separator: "'", maxSplits: 1)
             if parts.count == 2,
                let feet = Double(parts[0]),
                let inches = Double(parts[1]) {
-                // Handle negative sign correctly: -2'8" means -(2 + 8/12)
                 let sign: Double = feet < 0 ? -1.0 : 1.0
                 return sign * (abs(feet) + inches / 12.0)
+            } else if parts.count == 2,
+                      let feet = Double(parts[0]),
+                      parts[1].trimmingCharacters(in: .whitespaces).isEmpty {
+                return feet
             } else if parts.count == 1, let feet = Double(parts[0]) {
                 return feet
             }

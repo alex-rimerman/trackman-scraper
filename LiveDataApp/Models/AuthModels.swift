@@ -165,7 +165,7 @@ struct SavePitchRequest: Codable {
             pitcherHand: pitchData.pitcherHand.rawValue,
             stuffPlus: result?.stuffPlus,
             stuffPlusRaw: result?.stuffPlusRaw,
-            notes: nil
+            notes: pitchData.notes
         )
     }
 }

@@ -13,6 +13,7 @@ class PitchAnalysisViewModel: ObservableObject {
     @Published var errorMessage: String?
     @Published var backendAvailable: Bool = false
     @Published var ocrConfidence: OCRConfidence = .none
+    @Published var saveSuccessMessage: String?
     
     init() {
         Task { await checkBackendHealth() }
@@ -54,6 +55,7 @@ class PitchAnalysisViewModel: ObservableObject {
         isProcessing = true
         errorMessage = nil
         stuffPlusResult = nil
+        saveSuccessMessage = nil
         
         do {
             let result = try await StuffPlusService.calculateStuffPlus(for: pitchData)
@@ -62,7 +64,17 @@ class PitchAnalysisViewModel: ObservableObject {
             // Auto-save to backend if logged in
             if AuthService.isLoggedIn {
                 let saveReq = SavePitchRequest.from(pitchData: pitchData, result: result)
-                _ = try? await AuthService.savePitch(saveReq)
+                do {
+                    _ = try await AuthService.savePitch(saveReq)
+                    saveSuccessMessage = "Pitch saved to History"
+                    // Clear message after 3 seconds
+                    Task {
+                        try? await Task.sleep(nanoseconds: 3_000_000_000)
+                        saveSuccessMessage = nil
+                    }
+                } catch {
+                    errorMessage = "Failed to save pitch: \(error.localizedDescription)"
+                }
             }
             
             goToStep(.result)
@@ -78,6 +90,7 @@ class PitchAnalysisViewModel: ObservableObject {
         pitchData = PitchData()
         stuffPlusResult = nil
         errorMessage = nil
+        saveSuccessMessage = nil
         ocrConfidence = .none
         goToStep(.capture)
     }
@@ -85,7 +98,13 @@ class PitchAnalysisViewModel: ObservableObject {
     func adjustValues() {
         stuffPlusResult = nil
         errorMessage = nil
+        saveSuccessMessage = nil
         goToStep(.review)
+    }
+    
+    func rescanImage() async {
+        guard let image = selectedImage else { return }
+        await processImage(image)
     }
     
     func checkBackendHealth() async {

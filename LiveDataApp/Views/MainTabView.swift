@@ -19,6 +19,13 @@ struct MainTabView: View {
                     Text("History")
                 }
                 .tag(1)
+            
+            ReportView(authViewModel: authViewModel)
+                .tabItem {
+                    Image(systemName: "folder.fill")
+                    Text("Report")
+                }
+                .tag(2)
         }
         .tint(Color(red: 0.53, green: 0.81, blue: 0.92))
         .preferredColorScheme(.dark)

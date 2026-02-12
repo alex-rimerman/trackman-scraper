@@ -2,6 +2,8 @@ import SwiftUI
 
 struct ResultView: View {
     @ObservedObject var viewModel: PitchAnalysisViewModel
+    @State private var shareImage: Image?
+    @State private var showShareSheet = false
     
     var body: some View {
         ScrollView {
@@ -111,6 +113,27 @@ struct ResultView: View {
                     .cornerRadius(14)
                     .padding(.horizontal, 16)
                     
+                    // Notes section
+                    VStack(spacing: 12) {
+                        sectionHeader("Notes (optional)", icon: "note.text")
+                        
+                        TextField("Add notes about this pitch...", text: Binding(
+                            get: { viewModel.pitchData.notes ?? "" },
+                            set: { viewModel.pitchData.notes = $0.isEmpty ? nil : $0 }
+                        ), axis: .vertical)
+                        .lineLimit(3...6)
+                        .textFieldStyle(.plain)
+                        .padding(12)
+                        .background(Color.white.opacity(0.08))
+                        .cornerRadius(8)
+                        .foregroundColor(.white)
+                        .font(.subheadline)
+                    }
+                    .padding(16)
+                    .background(Color.white.opacity(0.05))
+                    .cornerRadius(14)
+                    .padding(.horizontal, 16)
+                    
                 } else {
                     VStack(spacing: 16) {
                         Image(systemName: "chart.bar.xaxis")
@@ -132,6 +155,23 @@ struct ResultView: View {
                         HStack {
                             Image(systemName: "pencil")
                             Text("Adjust Values")
+                                .fontWeight(.semibold)
+                        }
+                        .foregroundColor(Color(red: 0.53, green: 0.81, blue: 0.92))
+                        .frame(maxWidth: .infinity)
+                        .padding(.vertical, 14)
+                        .background(Color.white.opacity(0.08))
+                        .cornerRadius(14)
+                        .overlay(
+                            RoundedRectangle(cornerRadius: 14)
+                                .stroke(Color(red: 0.53, green: 0.81, blue: 0.92).opacity(0.4), lineWidth: 1)
+                        )
+                    }
+                    
+                    Button(action: { shareResult() }) {
+                        HStack {
+                            Image(systemName: "square.and.arrow.up")
+                            Text("Share Result")
                                 .fontWeight(.semibold)
                         }
                         .foregroundColor(Color(red: 0.53, green: 0.81, blue: 0.92))
@@ -172,6 +212,29 @@ struct ResultView: View {
                 .padding(.bottom, 40)
             }
         }
+        .sheet(isPresented: $showShareSheet) {
+            if let result = viewModel.stuffPlusResult {
+                ShareSheet(items: [
+                    """
+                    Developing Baseball - Stuff+ Analysis
+                    
+                    \(viewModel.pitchData.pitchType.displayName) • \(viewModel.pitchData.pitcherHand == .right ? "RHP" : "LHP")
+                    
+                    Stuff+: \(Int(result.stuffPlus))
+                    Grade: \(stuffPlusGrade(for: result.stuffPlus))
+                    
+                    Velocity: \(formatOptional(viewModel.pitchData.pitchSpeed, suffix: " mph"))
+                    IVB: \(formatOptional(viewModel.pitchData.inducedVertBreak, suffix: "\""))
+                    HB: \(formatOptional(viewModel.pitchData.horzBreak, suffix: "\""))
+                    Spin: \(formatOptional(viewModel.pitchData.totalSpin, suffix: " rpm", decimals: 0))
+                    """
+                ])
+            }
+        }
+    }
+    
+    private func shareResult() {
+        showShareSheet = true
     }
     
     private func sectionHeader(_ title: String, icon: String) -> some View {
@@ -248,4 +311,17 @@ struct ResultView: View {
             ("130+", .red)
         ]
     }
+}
+
+// MARK: - Share Sheet
+
+struct ShareSheet: UIViewControllerRepresentable {
+    let items: [Any]
+    
+    func makeUIViewController(context: Context) -> UIActivityViewController {
+        let controller = UIActivityViewController(activityItems: items, applicationActivities: nil)
+        return controller
+    }
+    
+    func updateUIViewController(_ uiViewController: UIActivityViewController, context: Context) {}
 }

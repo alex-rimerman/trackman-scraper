@@ -70,8 +70,12 @@ class AuthService {
         return try await post(endpoint: "/pitches", body: request, authenticated: true)
     }
     
-    static func getPitches() async throws -> [SavedPitch] {
-        return try await get(endpoint: "/pitches", authenticated: true)
+    static func getPitches(limit: Int = 50, offset: Int = 0, pitchType: String? = nil) async throws -> [SavedPitch] {
+        var endpoint = "/pitches?limit=\(limit)&offset=\(offset)"
+        if let pitchType = pitchType {
+            endpoint += "&pitch_type=\(pitchType)"
+        }
+        return try await get(endpoint: endpoint, authenticated: true)
     }
     
     static func deletePitch(id: String) async throws {

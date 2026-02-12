@@ -84,140 +84,281 @@ class TrackmanOCR {
         
         // --- Extract metrics using label proximity ---
         
+        // Global set of values already claimed by a field — prevents cross-assignment
+        var usedValues: Set<String> = []
+        
         // PITCH SPEED — OCR often splits "PITCH SPEED" into two observations
-        // Try combined label first, then just "SPEED" as standalone
+        // CRITICAL: Exclude values from the LEFT side (X < 0.35) — that's the velocity strip
+        // showing previous pitches (91.7, 92.0, etc.). The main pitch speed is in the right panel.
+        // Also exclude top of image (Y > 0.85) where the velocity strip header lives.
+        // Use preferLargestFont to pick the big bold main speed, not small strip values.
         if let value = findValueNearLabel(
             matching: ["PITCH SPEED", "PITCHSPEED"],
             in: allTexts,
             preferDirection: .below,
             maxHorizontalOffset: 0.25,
-            maxVerticalDistance: 0.08
+            maxVerticalDistance: 0.15,
+            minValueX: 0.35,
+            maxValueY: 0.85,
+            preferLabelInRightHalf: true,
+            preferLargestFont: true
         ) {
             pitchData.pitchSpeed = parseNumber(value)
+            usedValues.insert(value.trimmingCharacters(in: .whitespaces))
         }
         
-        // If that failed, try "SPEED" alone (OCR may split "PITCH" and "SPEED")
         if pitchData.pitchSpeed == nil {
             if let value = findValueNearLabel(
                 matching: ["SPEED"],
-                excluding: ["GROUND", "BAT", "EXIT"],  // avoid ground speed, bat speed, etc.
+                excluding: ["GROUND", "BAT", "EXIT", "PITCH"],
                 in: allTexts,
                 preferDirection: .below,
                 maxHorizontalOffset: 0.25,
-                maxVerticalDistance: 0.10
+                maxVerticalDistance: 0.15,
+                minValueX: 0.35,
+                maxValueY: 0.85,
+                preferLabelInRightHalf: true,
+                preferLargestFont: true,
+                excludeValueTexts: usedValues
             ) {
                 if let num = parseNumber(value), num >= 55 && num <= 110 {
                     pitchData.pitchSpeed = num
+                    usedValues.insert(value.trimmingCharacters(in: .whitespaces))
                 }
             }
         }
         
-        // Also try combining two adjacent OCR observations that form "PITCH SPEED"
         if pitchData.pitchSpeed == nil {
             if let value = findValueNearCombinedLabel(
                 word1: "PITCH", word2: "SPEED",
                 in: allTexts,
-                maxVerticalDistance: 0.10
+                maxVerticalDistance: 0.10,
+                minValueX: 0.35
             ) {
                 pitchData.pitchSpeed = parseNumber(value)
+                usedValues.insert(value.trimmingCharacters(in: .whitespaces))
             }
         }
         
-        // I. VERT. MOV — OCR may read the periods/spaces differently each time
-        if let value = findValueNearLabel(
-            matching: ["I. VERT. MOV", "I.VERT.MOV", "I. VERT MOV", "I.VERT MOV",
-                        "I VERT MOV", "VERT. MOV", "VERT MOV", "VERT.MOV",
-                        "I. VERT.", "VERT."],
-            in: allTexts,
-            preferDirection: .below,
-            maxHorizontalOffset: 0.25,
-            maxVerticalDistance: 0.12
-        ) {
-            pitchData.inducedVertBreak = parseNumber(value)
+        // Also add the string representation of the speed to exclude it from movement searches
+        if let speed = pitchData.pitchSpeed {
+            usedValues.insert(String(format: "%.1f", speed))
+            usedValues.insert(String(speed))
         }
         
-        // IVB fallback: try fuzzy match — any observation containing both "VERT" and "MOV"
-        if pitchData.inducedVertBreak == nil {
-            if let value = findValueNearFuzzyLabel(
-                requiredParts: ["VERT"],
+        // HORZ. MOV — extract FIRST because its label ("HORZ") is more specific than IVB's
+        // This prevents "VERT." from accidentally matching the HORZ value
+        if let value = findValueNearLabel(
+            matching: ["HORZ. MOV", "HORZ MOV", "HORZ.MOV", "HOR. MOV",
+                        "HORI. MOV", "HORIZ. MOV"],
+            in: allTexts,
+            preferDirection: .below,
+            maxHorizontalOffset: 0.15,
+            maxVerticalDistance: 0.12,
+            excludeValueTexts: usedValues
+        ) {
+            pitchData.horzBreak = parseNumber(value)
+            usedValues.insert(value.trimmingCharacters(in: .whitespaces))
+        }
+        
+        // HB wider search if first pass missed
+        if pitchData.horzBreak == nil {
+            if let value = findValueNearLabel(
+                matching: ["HORZ. MOV", "HORZ MOV", "HORZ.MOV", "HOR. MOV",
+                            "HORI. MOV", "HORIZ. MOV", "HORZ.", "HOR."],
                 in: allTexts,
-                maxVerticalDistance: 0.12
+                preferDirection: .below,
+                maxHorizontalOffset: 0.25,
+                maxVerticalDistance: 0.12,
+                excludeValueTexts: usedValues
             ) {
                 if let num = parseNumber(value), abs(num) <= 35 {
-                    pitchData.inducedVertBreak = num
+                    pitchData.horzBreak = num
+                    usedValues.insert(value.trimmingCharacters(in: .whitespaces))
                 }
             }
         }
         
-        // HORZ. MOV — same OCR variability
-        if let value = findValueNearLabel(
-            matching: ["HORZ. MOV", "HORZ MOV", "HORZ.MOV", "HOR. MOV",
-                        "HORI. MOV", "HORIZ. MOV", "HORZ.", "HOR."],
-            in: allTexts,
-            preferDirection: .below,
-            maxHorizontalOffset: 0.25,
-            maxVerticalDistance: 0.12
-        ) {
-            pitchData.horzBreak = parseNumber(value)
-        }
-        
-        // HB fallback: try fuzzy match — any observation containing "HORZ" or "HOR"
+        // HB fallback: try fuzzy match
         if pitchData.horzBreak == nil {
             if let value = findValueNearFuzzyLabel(
                 requiredParts: ["HOR"],
                 in: allTexts,
-                maxVerticalDistance: 0.12
+                maxVerticalDistance: 0.12,
+                excludeValueTexts: usedValues
             ) {
                 if let num = parseNumber(value), abs(num) <= 35 {
                     pitchData.horzBreak = num
+                    usedValues.insert(value.trimmingCharacters(in: .whitespaces))
                 }
             }
         }
         
-        // RELEASE HEIGHT — OCR may read periods/spaces differently
+        // I. VERT. MOV — extract AFTER horz so we can exclude the horz value
         if let value = findValueNearLabel(
-            matching: ["RELEASE HEIGHT", "REL HEIGHT", "REL. HEIGHT",
-                        "RELEASE HEIGHT", "REL.HEIGHT", "RELEASEHEIGHT"],
+            matching: ["I. VERT. MOV", "I.VERT.MOV", "I. VERT MOV", "I.VERT MOV",
+                        "I VERT MOV", "VERT. MOV", "VERT MOV", "VERT.MOV"],
+            in: allTexts,
+            preferDirection: .below,
+            maxHorizontalOffset: 0.15,
+            maxVerticalDistance: 0.12,
+            excludeValueTexts: usedValues
+        ) {
+            pitchData.inducedVertBreak = parseNumber(value)
+            usedValues.insert(value.trimmingCharacters(in: .whitespaces))
+        }
+        
+        // IVB wider search if first pass missed
+        if pitchData.inducedVertBreak == nil {
+            if let value = findValueNearLabel(
+                matching: ["I. VERT. MOV", "I.VERT.MOV", "I. VERT MOV", "I.VERT MOV",
+                            "I VERT MOV", "VERT. MOV", "VERT MOV", "VERT.MOV",
+                            "I. VERT.", "VERT."],
+                in: allTexts,
+                preferDirection: .below,
+                maxHorizontalOffset: 0.25,
+                maxVerticalDistance: 0.12,
+                excludeValueTexts: usedValues
+            ) {
+                pitchData.inducedVertBreak = parseNumber(value)
+                usedValues.insert(value.trimmingCharacters(in: .whitespaces))
+            }
+        }
+        
+        // IVB fallback: fuzzy match
+        if pitchData.inducedVertBreak == nil {
+            if let value = findValueNearFuzzyLabel(
+                requiredParts: ["VERT"],
+                in: allTexts,
+                maxVerticalDistance: 0.12,
+                excludeValueTexts: usedValues
+            ) {
+                if let num = parseNumber(value), abs(num) <= 35 {
+                    pitchData.inducedVertBreak = num
+                    usedValues.insert(value.trimmingCharacters(in: .whitespaces))
+                }
+            }
+        }
+        
+        // RELEASE HEIGHT, RELEASE SIDE, EXTENSION — values are typically to the RIGHT of labels
+        // Use the global usedValues set so movement values can't leak into release fields
+        
+        // RELEASE HEIGHT — try right, then below
+        if let value = findValueNearLabel(
+            matching: ["RELEASE HEIGHT", "REL HEIGHT", "REL. HEIGHT", "REL.HEIGHT", "RELEASEHEIGHT"],
+            in: allTexts,
+            preferDirection: .right,
+            maxHorizontalOffset: 0.3,
+            maxVerticalDistance: 0.08,
+            excludeValueTexts: usedValues
+        ) {
+            pitchData.releaseHeight = parseFeetInchesOrNumber(value)
+            usedValues.insert(value.trimmingCharacters(in: .whitespaces))
+        }
+        
+        if pitchData.releaseHeight == nil, let value = findValueNearLabel(
+            matching: ["RELEASE HEIGHT", "REL HEIGHT", "REL. HEIGHT", "REL.HEIGHT", "RELEASEHEIGHT"],
             in: allTexts,
             preferDirection: .below,
             maxHorizontalOffset: 0.25,
-            maxVerticalDistance: 0.12
+            maxVerticalDistance: 0.12,
+            excludeValueTexts: usedValues
         ) {
             pitchData.releaseHeight = parseFeetInchesOrNumber(value)
+            usedValues.insert(value.trimmingCharacters(in: .whitespaces))
         }
         
-        // Release Height fallback: try fuzzy match — any observation containing "RELEASE" and "HEIGHT"
         if pitchData.releaseHeight == nil {
             if let value = findValueNearFuzzyLabel(
                 requiredParts: ["RELEASE", "HEIGHT"],
                 in: allTexts,
-                maxVerticalDistance: 0.12
+                maxVerticalDistance: 0.12,
+                excludeValueTexts: usedValues
             ) {
                 pitchData.releaseHeight = parseFeetInchesOrNumber(value)
+                usedValues.insert(value.trimmingCharacters(in: .whitespaces))
             }
         }
         
-        // RELEASE SIDE — value is in feet-inches format (e.g. -2'8")
-        if let value = findValueNearLabel(
-            matching: ["RELEASE SIDE", "REL SIDE", "REL. SIDE"],
-            in: allTexts,
-            preferDirection: .below,
-            maxHorizontalOffset: 0.25,
-            maxVerticalDistance: 0.12
-        ) {
-            pitchData.releaseSide = parseFeetInchesOrNumber(value)
+        // Also add the parsed release height as a string to prevent reuse
+        if let rh = pitchData.releaseHeight {
+            usedValues.insert(String(format: "%.6f", rh))
+            usedValues.insert(String(rh))
         }
         
-        // EXTENSION
+        // RELEASE SIDE — try right, then below
         if let value = findValueNearLabel(
-            matching: ["EXTENSION", "EXT"],
-            excluding: ["RELEASE"],  // don't match RELEASE EXTENSION as a label for this
+            matching: ["RELEASE SIDE", "REL SIDE", "REL. SIDE", "RELEASESIDE", "REL.SIDE"],
+            in: allTexts,
+            preferDirection: .right,
+            maxHorizontalOffset: 0.3,
+            maxVerticalDistance: 0.08,
+            excludeValueTexts: usedValues
+        ) {
+            pitchData.releaseSide = parseFeetInchesOrNumber(value)
+            usedValues.insert(value.trimmingCharacters(in: .whitespaces))
+        }
+        
+        if pitchData.releaseSide == nil, let value = findValueNearLabel(
+            matching: ["RELEASE SIDE", "REL SIDE", "REL. SIDE", "RELEASESIDE", "REL.SIDE"],
             in: allTexts,
             preferDirection: .below,
             maxHorizontalOffset: 0.25,
-            maxVerticalDistance: 0.12
+            maxVerticalDistance: 0.12,
+            excludeValueTexts: usedValues
+        ) {
+            pitchData.releaseSide = parseFeetInchesOrNumber(value)
+            usedValues.insert(value.trimmingCharacters(in: .whitespaces))
+        }
+        
+        if pitchData.releaseSide == nil {
+            if let value = findValueNearFuzzyLabel(
+                requiredParts: ["RELEASE", "SIDE"],
+                in: allTexts,
+                maxVerticalDistance: 0.12,
+                excludeValueTexts: usedValues
+            ) {
+                pitchData.releaseSide = parseFeetInchesOrNumber(value)
+                usedValues.insert(value.trimmingCharacters(in: .whitespaces))
+            }
+        }
+        
+        // EXTENSION — try right, then below
+        if let value = findValueNearLabel(
+            matching: ["EXTENSION", "EXT"],
+            excluding: ["RELEASE"],
+            in: allTexts,
+            preferDirection: .right,
+            maxHorizontalOffset: 0.3,
+            maxVerticalDistance: 0.08,
+            excludeValueTexts: usedValues
         ) {
             pitchData.extensionFt = parseFeetInchesOrNumber(value)
+            usedValues.insert(value.trimmingCharacters(in: .whitespaces))
+        }
+        
+        if pitchData.extensionFt == nil, let value = findValueNearLabel(
+            matching: ["EXTENSION", "EXT"],
+            excluding: ["RELEASE"],
+            in: allTexts,
+            preferDirection: .below,
+            maxHorizontalOffset: 0.25,
+            maxVerticalDistance: 0.12,
+            excludeValueTexts: usedValues
+        ) {
+            pitchData.extensionFt = parseFeetInchesOrNumber(value)
+            usedValues.insert(value.trimmingCharacters(in: .whitespaces))
+        }
+        
+        if pitchData.extensionFt == nil {
+            if let value = findValueNearFuzzyLabel(
+                requiredParts: ["EXT"],
+                in: allTexts,
+                maxVerticalDistance: 0.12,
+                excludeValueTexts: usedValues
+            ) {
+                pitchData.extensionFt = parseFeetInchesOrNumber(value)
+            }
         }
         
         // TOTAL SPIN — be specific; "SPIN" alone is too broad (matches ACTIVE SPIN, BALL SPIN)
@@ -314,8 +455,28 @@ class TrackmanOCR {
     // MARK: - Pitch Type Detection
     
     private static func detectPitchType(from allTexts: [(String, TextObservation)], into pitchData: inout PitchData) {
-        // Look for pitch type codes in the details/header area (right side, top)
-        // Trackman shows "CH", "FF", "SI", "SL", "CU", "FC", "ST", "FS" in the header
+        // PRIORITY 1: Look for "PITCH TYPE" + code (e.g. "PITCH TYPE CB", "PITCH TYPE FF")
+        // This is the selected pitch in the TAGS section — not the header options
+        let codeMap: [String: PitchType] = [
+            "CH": .changeup, "FF": .fastball, "SI": .sinker,
+            "FC": .cutter, "SL": .slider, "CU": .curveball,
+            "CB": .curveball,  // Trackman uses "CB" for Curveball
+            "ST": .sweeper, "FS": .splitter, "KC": .knuckleCurve,
+            "SW": .sweeper,    // Some Trackman versions use "SW"
+        ]
+        
+        for (text, obs) in allTexts {
+            let upper = text.uppercased()
+            if upper.contains("PITCH TYPE") || upper.contains("PITCHTYPE") {
+                let parts = upper.split(separator: " ").map { String($0) }
+                if let last = parts.last, last.count == 2, let type = codeMap[last] {
+                    pitchData.pitchType = type
+                    return
+                }
+            }
+        }
+        
+        // PRIORITY 2: Look for pitch type names in the sidebar (e.g. "Curve", "Curveball")
         let pitchTypeMap: [String: PitchType] = [
             "CHANGEUP": .changeup, "CHANGE UP": .changeup, "CHANGE-UP": .changeup,
             "FASTBALL": .fastball, "FOUR-SEAM": .fastball, "4-SEAM": .fastball,
@@ -329,7 +490,6 @@ class TrackmanOCR {
         ]
         
         for (text, obs) in allTexts {
-            // Look for pitch type names (typically on the right sidebar)
             for (name, type) in pitchTypeMap {
                 if text.contains(name) {
                     pitchData.pitchType = type
@@ -338,20 +498,12 @@ class TrackmanOCR {
             }
         }
         
-        // Also look for 2-letter codes that appear as standalone text in header
-        // These appear in "Default Pitching" section (top-right of Trackman)
-        let codeMap: [String: PitchType] = [
-            "CH": .changeup, "FF": .fastball, "SI": .sinker,
-            "FC": .cutter, "SL": .slider, "CU": .curveball,
-            "ST": .sweeper, "FS": .splitter, "KC": .knuckleCurve,
-        ]
-        
+        // PRIORITY 3: Standalone 2-letter codes anywhere in the right or bottom areas
         for (text, obs) in allTexts {
             let trimmed = text.trimmingCharacters(in: .whitespaces)
-            // Only match standalone 2-letter codes (not part of longer text)
             if trimmed.count == 2, let type = codeMap[trimmed] {
-                // Prefer codes found in the right portion of the screen (x > 0.7)
-                if obs.boundingBox.midX > 0.7 {
+                // Accept codes from: right side (x > 0.6), or bottom area (y < 0.15)
+                if obs.boundingBox.midX > 0.6 || obs.boundingBox.midY < 0.15 {
                     pitchData.pitchType = type
                     return
                 }
@@ -382,23 +534,35 @@ class TrackmanOCR {
         in allTexts: [(String, TextObservation)],
         preferDirection: SearchDirection = .below,
         maxHorizontalOffset: CGFloat = 0.25,
-        maxVerticalDistance: CGFloat = 0.08
+        maxVerticalDistance: CGFloat = 0.08,
+        minValueX: CGFloat? = nil,
+        maxValueY: CGFloat? = nil,
+        preferLabelInRightHalf: Bool = false,
+        preferLargestFont: Bool = false,
+        excludeValueTexts: Set<String> = []
     ) -> String? {
-        // Step 1: Find the label observation
+        // Step 1: Find the label observation (prefer rightmost if preferLabelInRightHalf)
         var labelObs: TextObservation?
+        var bestLabelX: CGFloat = -1
         
         for (text, obs) in allTexts {
-            // Skip if text contains any exclusion
             let excluded = exclusions.contains(where: { text.contains($0) })
             if excluded { continue }
             
             for variant in labelVariants {
                 if text.contains(variant) {
-                    labelObs = obs
-                    break
+                    if preferLabelInRightHalf {
+                        if obs.boundingBox.midX > bestLabelX {
+                            bestLabelX = obs.boundingBox.midX
+                            labelObs = obs
+                        }
+                    } else {
+                        labelObs = obs
+                        break
+                    }
                 }
             }
-            if labelObs != nil { break }
+            if labelObs != nil && !preferLabelInRightHalf { break }
         }
         
         guard let label = labelObs else { return nil }
@@ -408,11 +572,12 @@ class TrackmanOCR {
         var bestScore: CGFloat = .greatestFiniteMagnitude
         
         for (text, obs) in allTexts {
-            // Skip labels and non-value text
             if isKnownLabel(text) { continue }
             if obs.boundingBox == label.boundingBox { continue }
+            if excludeValueTexts.contains(obs.text.trimmingCharacters(in: .whitespaces)) { continue }
+            if let minX = minValueX, obs.boundingBox.midX < minX { continue }
+            if let maxY = maxValueY, obs.boundingBox.midY > maxY { continue }
             
-            // Must look like a value (number, feet-inches, time format, percentage)
             if !looksLikeValue(obs.text) { continue }
             
             let dx = obs.boundingBox.midX - label.boundingBox.midX
@@ -424,11 +589,20 @@ class TrackmanOCR {
                 // Value should be below the label
                 guard dy > 0 && dy < maxVerticalDistance else { continue }
                 guard abs(dx) < maxHorizontalOffset else { continue }
-                // Score: prefer closer vertically, penalize horizontal offset
-                let score = dy + abs(dx) * 2.0
-                if score < bestScore {
-                    bestScore = score
-                    bestMatch = obs
+                if preferLargestFont {
+                    // Prefer largest bounding box height (biggest font = main display value)
+                    let fontScore = -obs.boundingBox.height  // negative so larger = better (lower score)
+                    if fontScore < bestScore {
+                        bestScore = fontScore
+                        bestMatch = obs
+                    }
+                } else {
+                    // Score: prefer closer vertically, penalize horizontal offset
+                    let score = dy + abs(dx) * 2.0
+                    if score < bestScore {
+                        bestScore = score
+                        bestMatch = obs
+                    }
                 }
                 
             case .right:
@@ -464,7 +638,8 @@ class TrackmanOCR {
         word1: String,
         word2: String,
         in allTexts: [(String, TextObservation)],
-        maxVerticalDistance: CGFloat = 0.10
+        maxVerticalDistance: CGFloat = 0.10,
+        minValueX: CGFloat? = nil
     ) -> String? {
         // Find observations containing word1 and word2
         var obs1: TextObservation?
@@ -494,6 +669,7 @@ class TrackmanOCR {
             if isKnownLabel(text) { continue }
             if !looksLikeValue(obs.text) { continue }
             if obs.boundingBox == o1.boundingBox || obs.boundingBox == o2.boundingBox { continue }
+            if let minX = minValueX, obs.boundingBox.midX < minX { continue }
             
             let dx = obs.boundingBox.midX - labelCenterX
             let dy = labelBottomY - obs.boundingBox.midY  // positive = value is below label
@@ -516,7 +692,8 @@ class TrackmanOCR {
     private static func findValueNearFuzzyLabel(
         requiredParts: [String],
         in allTexts: [(String, TextObservation)],
-        maxVerticalDistance: CGFloat = 0.12
+        maxVerticalDistance: CGFloat = 0.12,
+        excludeValueTexts: Set<String> = []
     ) -> String? {
         // Find any observation that contains all required substrings
         var labelObs: TextObservation?
@@ -536,6 +713,7 @@ class TrackmanOCR {
         for (text, obs) in allTexts {
             if isKnownLabel(text) { continue }
             if obs.boundingBox == label.boundingBox { continue }
+            if excludeValueTexts.contains(obs.text.trimmingCharacters(in: .whitespaces)) { continue }
             if !looksLikeValue(obs.text) { continue }
             
             let dx = obs.boundingBox.midX - label.boundingBox.midX
@@ -602,6 +780,10 @@ class TrackmanOCR {
             "LEGACY FLAGS", "DETAILS", "CLOSE",
             "NO TRACKMAN", "RESET", "SPEED",
             "PITCHER'S VIEW", "PITCHER VIEW",
+            "PITCH TYPE", "PITCHTYPE", "PITCH SET",
+            "FLAG", "TAGS", "CURVEBALL", "CURVE",
+            "PITCH COUNT", "PITCH GROUP",
+            "PITCH SPEED >", "PITCHSPEED >",
         ]
         
         // Check exact match first
@@ -669,7 +851,10 @@ class TrackmanOCR {
         // --- Pitch Speed fallback: multiple strategies ---
         if pitchData.pitchSpeed == nil {
             // Strategy 1: Look for "XX.X mph" or "XX.X" near the word "mph"
+            // Skip the top velocity strip (Y > 0.85) and left side (X < 0.35)
             for obs in sorted {
+                if obs.boundingBox.midY > 0.85 { continue }
+                if obs.boundingBox.midX < 0.35 { continue }
                 let text = obs.text.trimmingCharacters(in: .whitespaces).lowercased()
                 if text.contains("mph") {
                     let numStr = text.replacingOccurrences(of: "mph", with: "").trimmingCharacters(in: .whitespaces)
@@ -682,23 +867,25 @@ class TrackmanOCR {
         }
         
         if pitchData.pitchSpeed == nil {
-            // Strategy 2: Find a number 55-110 in the upper-right area of the screen
-            // Trackman puts pitch speed in the right column, upper portion
+            // Strategy 2: Find a number 55-110 in the main display area.
+            // Exclude: (1) top velocity strip (Y > 0.85), (2) left pitch list (X < 0.35)
             var candidates: [(Double, TextObservation)] = []
             for obs in sorted {
+                if obs.boundingBox.midY > 0.85 { continue }
+                if obs.boundingBox.midX < 0.35 { continue }
+                
                 let text = obs.text.trimmingCharacters(in: .whitespaces)
                 if let num = Double(text), num >= 55 && num <= 110 {
                     candidates.append((num, obs))
                 }
             }
             
-            // Prefer candidates in the right half, upper half of the screen
-            // Vision coordinates: x=0 is left, x=1 is right; y=0 is bottom, y=1 is top
-            let rightSide = candidates.filter { $0.1.boundingBox.midX > 0.4 }
-            if let best = rightSide.first {
-                pitchData.pitchSpeed = best.0
-            } else if let best = candidates.first {
-                // If nothing on right side, take the first candidate anywhere
+            // Prefer the candidate with the largest bounding box height (biggest font = main display)
+            let sorted_by_size = candidates.sorted {
+                $0.1.boundingBox.height > $1.1.boundingBox.height
+            }
+            
+            if let best = sorted_by_size.first {
                 pitchData.pitchSpeed = best.0
             }
         }
