@@ -12,6 +12,7 @@ struct ReportView: View {
     @State private var showReport = false
     @State private var showShareSheet = false
     @State private var shareImage: UIImage?
+    @State private var showProfilesSheet = false
     
     var body: some View {
         ZStack {
@@ -31,11 +32,14 @@ struct ReportView: View {
                 }
             }
         }
-        .task { await loadPitches() }
+        .task(id: AuthService.currentProfileId ?? "") { await loadPitches() }
         .sheet(isPresented: $showShareSheet) {
             if let image = shareImage {
                 ShareSheet(items: [image])
             }
+        }
+        .sheet(isPresented: $showProfilesSheet) {
+            ProfilesView(authViewModel: authViewModel)
         }
     }
     
@@ -90,6 +94,11 @@ struct ReportView: View {
             } else {
                 Menu {
                     Text(authViewModel.userEmail)
+                    if AuthService.accountType == "team" {
+                        Button(action: { showProfilesSheet = true }) {
+                            Label("Profiles", systemImage: "person.3.fill")
+                        }
+                    }
                     Divider()
                     Button(role: .destructive) { authViewModel.logout() } label: {
                         Label("Log Out", systemImage: "rectangle.portrait.and.arrow.right")
@@ -316,7 +325,7 @@ struct ReportView: View {
     
     private var reportTitleSection: some View {
         VStack(spacing: 6) {
-            Text(authViewModel.userName)
+            Text(AuthService.currentProfileName ?? authViewModel.userName)
                 .font(.system(size: 28, weight: .bold, design: .rounded))
                 .foregroundColor(.white)
             Text("Pitching Summary")
@@ -683,7 +692,8 @@ struct ReportView: View {
         isLoading = true
         errorMessage = nil
         do {
-            allPitches = try await AuthService.getPitches(limit: 200)
+            let profileId = AuthService.currentProfileId ?? AuthService.defaultProfileId
+            allPitches = try await AuthService.getPitches(limit: 200, profileId: profileId)
         } catch {
             if case AuthError.unauthorized = error {
                 authViewModel.logout()
@@ -696,7 +706,7 @@ struct ReportView: View {
     
     private func exportReport() {
         let reportView = ReportExportView(
-            playerName: authViewModel.userName,
+            playerName: AuthService.currentProfileName ?? authViewModel.userName,
             rows: reportSummaryRows,
             dateString: formattedToday
         )
@@ -811,7 +821,7 @@ struct ReportExportView: View {
                 .foregroundColor(.white)
             Text("Pitching Summary")
                 .font(.system(size: 18, weight: .medium))
-                .foregroundColor(.white.opacity(0.7))
+                .foregroundColor(.white)
         }
         .padding(.bottom, 8)
     }
@@ -822,7 +832,7 @@ struct ReportExportView: View {
         VStack(spacing: 6) {
             Text("Pitch Movement (inches)")
                 .font(.system(size: 12, weight: .semibold))
-                .foregroundColor(.white.opacity(0.7))
+                .foregroundColor(.white)
             
             Chart {
                 RuleMark(y: .value("Zero", 0))
@@ -850,6 +860,22 @@ struct ReportExportView: View {
             .chartYAxisLabel("Induced Vert Break")
             .chartXScale(domain: -25...25)
             .chartYScale(domain: -25...25)
+            .chartXAxis {
+                AxisMarks(position: .bottom) { _ in
+                    AxisGridLine(stroke: StrokeStyle(lineWidth: 0.5))
+                        .foregroundStyle(.white.opacity(0.25))
+                    AxisValueLabel()
+                        .foregroundStyle(.white)
+                }
+            }
+            .chartYAxis {
+                AxisMarks(position: .leading) { _ in
+                    AxisGridLine(stroke: StrokeStyle(lineWidth: 0.5))
+                        .foregroundStyle(.white.opacity(0.25))
+                    AxisValueLabel()
+                        .foregroundStyle(.white)
+                }
+            }
             .frame(height: 220)
         }
         .padding(12)
@@ -863,7 +889,7 @@ struct ReportExportView: View {
         VStack(spacing: 6) {
             Text("Release Point (feet)")
                 .font(.system(size: 12, weight: .semibold))
-                .foregroundColor(.white.opacity(0.7))
+                .foregroundColor(.white)
             
             Chart {
                 ForEach(rows, id: \.pitchType) { row in
@@ -884,6 +910,22 @@ struct ReportExportView: View {
             .chartYAxisLabel("Vertical Release")
             .chartXScale(domain: -3.5...3.5)
             .chartYScale(domain: 0.0...7.5)
+            .chartXAxis {
+                AxisMarks(position: .bottom) { _ in
+                    AxisGridLine(stroke: StrokeStyle(lineWidth: 0.5))
+                        .foregroundStyle(.white.opacity(0.25))
+                    AxisValueLabel()
+                        .foregroundStyle(.white)
+                }
+            }
+            .chartYAxis {
+                AxisMarks(position: .leading) { _ in
+                    AxisGridLine(stroke: StrokeStyle(lineWidth: 0.5))
+                        .foregroundStyle(.white.opacity(0.25))
+                    AxisValueLabel()
+                        .foregroundStyle(.white)
+                }
+            }
             .frame(height: 220)
         }
         .padding(12)
@@ -921,12 +963,12 @@ struct ReportExportView: View {
         if flex {
             Text(title)
                 .font(.system(size: 11, weight: .bold))
-                .foregroundColor(.white.opacity(0.8))
+                .foregroundColor(.white)
                 .frame(maxWidth: .infinity, alignment: alignment == .leading ? .leading : .center)
         } else {
             Text(title)
                 .font(.system(size: 11, weight: .bold))
-                .foregroundColor(.white.opacity(0.8))
+                .foregroundColor(.white)
                 .frame(width: width)
         }
     }
@@ -948,23 +990,23 @@ struct ReportExportView: View {
             
             Text(String(format: "%.1f", row.velo))
                 .font(.system(size: 12, weight: .medium, design: .rounded))
-                .foregroundColor(.white.opacity(0.9))
+                .foregroundColor(.white)
                 .frame(width: 65)
             Text(String(format: "%.1f", row.ivb))
                 .font(.system(size: 12, weight: .medium, design: .rounded))
-                .foregroundColor(.white.opacity(0.9))
+                .foregroundColor(.white)
                 .frame(width: 55)
             Text(String(format: "%.1f", row.hb))
                 .font(.system(size: 12, weight: .medium, design: .rounded))
-                .foregroundColor(.white.opacity(0.9))
+                .foregroundColor(.white)
                 .frame(width: 55)
             Text(String(format: "%.0f", row.spin))
                 .font(.system(size: 12, weight: .medium, design: .rounded))
-                .foregroundColor(.white.opacity(0.9))
+                .foregroundColor(.white)
                 .frame(width: 60)
             Text(String(format: "%.1f", row.ext))
                 .font(.system(size: 12, weight: .medium, design: .rounded))
-                .foregroundColor(.white.opacity(0.9))
+                .foregroundColor(.white)
                 .frame(width: 50)
             Text(String(format: "%.0f", row.stuffPlus))
                 .font(.system(size: 13, weight: .bold, design: .rounded))
@@ -986,7 +1028,7 @@ struct ReportExportView: View {
             Spacer()
             Text(dateString)
                 .font(.system(size: 10))
-                .foregroundColor(.white.opacity(0.5))
+                .foregroundColor(.white)
         }
         .padding(.top, 8)
     }

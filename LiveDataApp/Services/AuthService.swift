@@ -11,6 +11,10 @@ class AuthService {
     private static let userIdKey = "auth_user_id"
     private static let userEmailKey = "auth_user_email"
     private static let userNameKey = "auth_user_name"
+    private static let accountTypeKey = "auth_account_type"
+    private static let defaultProfileIdKey = "auth_default_profile_id"
+    private static let currentProfileIdKey = "auth_current_profile_id"
+    private static let currentProfileNameKey = "auth_current_profile_name"
     
     static var token: String? {
         get { UserDefaults.standard.string(forKey: tokenKey) }
@@ -32,6 +36,28 @@ class AuthService {
         set { UserDefaults.standard.set(newValue, forKey: userNameKey) }
     }
     
+    static var accountType: String? {
+        get { UserDefaults.standard.string(forKey: accountTypeKey) }
+        set { UserDefaults.standard.set(newValue, forKey: accountTypeKey) }
+    }
+    
+    static var defaultProfileId: String? {
+        get { UserDefaults.standard.string(forKey: defaultProfileIdKey) }
+        set { UserDefaults.standard.set(newValue, forKey: defaultProfileIdKey) }
+    }
+    
+    /// For team accounts: which profile is selected. For personal: same as defaultProfileId.
+    static var currentProfileId: String? {
+        get { UserDefaults.standard.string(forKey: currentProfileIdKey) ?? defaultProfileId }
+        set { UserDefaults.standard.set(newValue, forKey: currentProfileIdKey) }
+    }
+    
+    /// Profile name for the currently selected profile (team accounts). Used for reports/display.
+    static var currentProfileName: String? {
+        get { UserDefaults.standard.string(forKey: currentProfileNameKey) }
+        set { UserDefaults.standard.set(newValue, forKey: currentProfileNameKey) }
+    }
+    
     static var isLoggedIn: Bool { token != nil }
     
     static func logout() {
@@ -39,12 +65,16 @@ class AuthService {
         currentUserId = nil
         currentUserEmail = nil
         currentUserName = nil
+        accountType = nil
+        defaultProfileId = nil
+        currentProfileId = nil
+        currentProfileName = nil
     }
     
     // MARK: - Auth Endpoints
     
-    static func signup(email: String, name: String, password: String) async throws -> AuthResponse {
-        let body = SignupRequest(email: email, name: name, password: password)
+    static func signup(email: String, name: String, password: String, accountType: String = "personal") async throws -> AuthResponse {
+        let body = SignupRequest(email: email, name: name, password: password, accountType: accountType)
         let response: AuthResponse = try await post(endpoint: "/auth/signup", body: body)
         saveAuth(response)
         return response
@@ -62,6 +92,28 @@ class AuthService {
         currentUserId = response.userId
         currentUserEmail = response.email
         currentUserName = response.name
+        accountType = response.resolvedAccountType
+        defaultProfileId = response.defaultProfileId
+        currentProfileId = response.defaultProfileId
+        // For personal accounts, profile name is the user's name
+        if response.resolvedAccountType == "personal" {
+            currentProfileName = response.name
+        } else {
+            currentProfileName = nil  // Team: set when profile is selected
+        }
+    }
+    
+    // MARK: - Profile Endpoints
+    
+    static func getProfiles() async throws -> [Profile] {
+        return try await get(endpoint: "/profiles", authenticated: true)
+    }
+    
+    static func createProfile(name: String) async throws -> Profile {
+        struct CreateProfileRequest: Codable {
+            let name: String
+        }
+        return try await post(endpoint: "/profiles", body: CreateProfileRequest(name: name), authenticated: true)
     }
     
     // MARK: - Pitch Storage Endpoints
@@ -70,10 +122,13 @@ class AuthService {
         return try await post(endpoint: "/pitches", body: request, authenticated: true)
     }
     
-    static func getPitches(limit: Int = 50, offset: Int = 0, pitchType: String? = nil) async throws -> [SavedPitch] {
+    static func getPitches(limit: Int = 50, offset: Int = 0, pitchType: String? = nil, profileId: String? = nil) async throws -> [SavedPitch] {
         var endpoint = "/pitches?limit=\(limit)&offset=\(offset)"
         if let pitchType = pitchType {
             endpoint += "&pitch_type=\(pitchType)"
+        }
+        if let profileId = profileId {
+            endpoint += "&profile_id=\(profileId.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? profileId)"
         }
         return try await get(endpoint: endpoint, authenticated: true)
     }

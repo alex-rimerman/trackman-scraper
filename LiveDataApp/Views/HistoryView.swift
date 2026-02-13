@@ -8,6 +8,7 @@ struct HistoryView: View {
     @State private var selectedPitch: SavedPitch?
     @State private var selectedFilter: String?
     @State private var showFilterMenu = false
+    @State private var showProfilesSheet = false
     
     var body: some View {
         ZStack {
@@ -76,6 +77,11 @@ struct HistoryView: View {
                         // User menu
                         Menu {
                             Text(authViewModel.userEmail)
+                            if AuthService.accountType == "team" {
+                                Button(action: { showProfilesSheet = true }) {
+                                    Label("Profiles", systemImage: "person.3.fill")
+                                }
+                            }
                             Divider()
                             Button(role: .destructive) {
                                 authViewModel.logout()
@@ -86,7 +92,7 @@ struct HistoryView: View {
                             HStack(spacing: 6) {
                                 Image(systemName: "person.circle.fill")
                                     .font(.system(size: 20))
-                                Text(authViewModel.userName.components(separatedBy: " ").first ?? "")
+                                Text((AuthService.currentProfileName ?? authViewModel.userName).components(separatedBy: " ").first ?? "")
                                     .font(.system(size: 14, weight: .medium))
                             }
                             .foregroundColor(.white.opacity(0.8))
@@ -174,11 +180,14 @@ struct HistoryView: View {
                 }
             }
         }
-        .task {
+        .task(id: AuthService.currentProfileId ?? "") {
             await loadPitches()
         }
         .sheet(item: $selectedPitch) { pitch in
             PitchDetailView(pitch: pitch)
+        }
+        .sheet(isPresented: $showProfilesSheet) {
+            ProfilesView(authViewModel: authViewModel)
         }
     }
     
@@ -260,7 +269,8 @@ struct HistoryView: View {
         isLoading = true
         errorMessage = nil
         do {
-            pitches = try await AuthService.getPitches(pitchType: selectedFilter)
+            let profileId = AuthService.currentProfileId ?? AuthService.defaultProfileId
+            pitches = try await AuthService.getPitches(pitchType: selectedFilter, profileId: profileId)
         } catch {
             if case AuthError.unauthorized = error {
                 authViewModel.logout()
@@ -295,13 +305,18 @@ struct HistoryView: View {
             
             let recentPitches = Array(pitches.prefix(10))
             let stuffPlusValues = recentPitches.compactMap { $0.stuffPlus }
+            let fastballTypes = ["FF", "SI", "FC"]
+            let peakFbVelo = pitches
+                .filter { fastballTypes.contains($0.pitchType) }
+                .compactMap { $0.pitchSpeed }
+                .max()
             
             if !stuffPlusValues.isEmpty {
                 VStack(spacing: 8) {
                     HStack(spacing: 16) {
                         statCard("Avg Stuff+", value: String(format: "%.1f", stuffPlusValues.reduce(0, +) / Double(stuffPlusValues.count)))
                         statCard("Best", value: String(format: "%.0f", stuffPlusValues.max() ?? 0))
-                        statCard("Last 10", value: "\(recentPitches.count)")
+                        statCard("Peak FB Velo", value: peakFbVelo.map { String(format: "%.1f", $0) } ?? "—")
                     }
                     
                     // Mini trend chart

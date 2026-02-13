@@ -7,6 +7,7 @@ class AuthViewModel: ObservableObject {
     @Published var isLoggedIn: Bool = AuthService.isLoggedIn
     @Published var userName: String = AuthService.currentUserName ?? ""
     @Published var userEmail: String = AuthService.currentUserEmail ?? ""
+    @Published var accountType: String = AuthService.accountType ?? "personal"
     
     // Login / Signup form state
     @Published var email: String = ""
@@ -28,6 +29,7 @@ class AuthViewModel: ObservableObject {
             let response = try await AuthService.login(email: email, password: password)
             userName = response.name
             userEmail = response.email
+            accountType = response.resolvedAccountType
             isLoggedIn = true
             clearForm()
         } catch {
@@ -50,9 +52,10 @@ class AuthViewModel: ObservableObject {
         errorMessage = nil
         
         do {
-            let response = try await AuthService.signup(email: email, name: name, password: password)
+            let response = try await AuthService.signup(email: email, name: name, password: password, accountType: accountType)
             userName = response.name
             userEmail = response.email
+            accountType = response.resolvedAccountType
             isLoggedIn = true
             clearForm()
         } catch {

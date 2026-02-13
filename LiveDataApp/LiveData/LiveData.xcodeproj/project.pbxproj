@@ -25,6 +25,7 @@
 		8DABA70E2F36A0500020EB72 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = 8DABA70D2F36A0500020EB72 /* Assets.xcassets */; };
 		8DABA7FE2F36A0500020EB72 /* PitchDetailView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8DABA7FF2F36A0500020EB72 /* PitchDetailView.swift */; };
 		8DABA8002F36A0500020EB72 /* ReportView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8DABA8012F36A0500020EB72 /* ReportView.swift */; };
+		8DABA8022F36A0500020EB72 /* ProfilesView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8DABA8032F36A0500020EB72 /* ProfilesView.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -68,6 +69,7 @@
 		8DABA70D2F36A0500020EB72 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
 		8DABA7FF2F36A0500020EB72 /* PitchDetailView.swift */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.swift; path = PitchDetailView.swift; sourceTree = "<group>"; };
 		8DABA8012F36A0500020EB72 /* ReportView.swift */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.swift; path = ReportView.swift; sourceTree = "<group>"; };
+		8DABA8032F36A0500020EB72 /* ProfilesView.swift */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.swift; path = ProfilesView.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -169,6 +171,7 @@
 				8DABA7FF2F36A0500020EB72 /* PitchDetailView.swift */,
 				8DABA7062F36A0500020EB72 /* MainTabView.swift */,
 				8DABA8012F36A0500020EB72 /* ReportView.swift */,
+				8DABA8032F36A0500020EB72 /* ProfilesView.swift */,
 			);
 			path = Views;
 			sourceTree = "<group>";
@@ -346,6 +349,7 @@
 				8DABA7FE2F36A0500020EB72 /* PitchDetailView.swift in Sources */,
 				8DABA70C2F36A0500020EB72 /* MainTabView.swift in Sources */,
 				8DABA8002F36A0500020EB72 /* ReportView.swift in Sources */,
+				8DABA8022F36A0500020EB72 /* ProfilesView.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -504,7 +508,7 @@
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 4;
+				CURRENT_PROJECT_VERSION = 6;
 				DEVELOPMENT_ASSET_PATHS = "";
 				DEVELOPMENT_TEAM = FBG4AT9NN6;
 				ENABLE_PREVIEWS = YES;
@@ -519,7 +523,7 @@
 					"$(inherited)",
 					"@executable_path/Frameworks",
 				);
-				MARKETING_VERSION = 1.1;
+				MARKETING_VERSION = 1.2;
 				PRODUCT_BUNDLE_IDENTIFIER = "my-stuff.LiveData";
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SWIFT_EMIT_LOC_STRINGS = YES;
@@ -534,7 +538,7 @@
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 4;
+				CURRENT_PROJECT_VERSION = 6;
 				DEVELOPMENT_ASSET_PATHS = "";
 				DEVELOPMENT_TEAM = FBG4AT9NN6;
 				ENABLE_PREVIEWS = YES;
@@ -549,7 +553,7 @@
 					"$(inherited)",
 					"@executable_path/Frameworks",
 				);
-				MARKETING_VERSION = 1.1;
+				MARKETING_VERSION = 1.2;
 				PRODUCT_BUNDLE_IDENTIFIER = "my-stuff.LiveData";
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SWIFT_EMIT_LOC_STRINGS = YES;

@@ -3,6 +3,7 @@ import SwiftUI
 struct ContentView: View {
     @ObservedObject var authViewModel: AuthViewModel
     @StateObject private var viewModel = PitchAnalysisViewModel()
+    @State private var showProfilesSheet = false
     
     var body: some View {
         NavigationStack {
@@ -61,6 +62,9 @@ struct ContentView: View {
                 }
             }
             .navigationBarHidden(true)
+            .sheet(isPresented: $showProfilesSheet) {
+                ProfilesView(authViewModel: authViewModel)
+            }
         }
     }
     
@@ -98,6 +102,11 @@ struct ContentView: View {
                 // User menu
                 Menu {
                     Text(authViewModel.userEmail)
+                    if AuthService.accountType == "team" {
+                        Button(action: { showProfilesSheet = true }) {
+                            Label("Profiles", systemImage: "person.3.fill")
+                        }
+                    }
                     Divider()
                     Button(role: .destructive) {
                         authViewModel.logout()

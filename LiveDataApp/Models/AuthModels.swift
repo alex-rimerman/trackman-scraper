@@ -11,6 +11,12 @@ struct SignupRequest: Codable {
     let email: String
     let name: String
     let password: String
+    let accountType: String  // "personal" | "team"
+    
+    enum CodingKeys: String, CodingKey {
+        case email, name, password
+        case accountType = "account_type"
+    }
 }
 
 // MARK: - Auth Response
@@ -20,12 +26,31 @@ struct AuthResponse: Codable {
     let userId: String
     let email: String
     let name: String
+    let accountType: String?
+    let defaultProfileId: String?
     
     enum CodingKeys: String, CodingKey {
         case token
         case userId = "user_id"
         case email
         case name
+        case accountType = "account_type"
+        case defaultProfileId = "default_profile_id"
+    }
+    
+    var resolvedAccountType: String { accountType ?? "personal" }
+}
+
+// MARK: - Profile
+
+struct Profile: Codable, Identifiable {
+    let id: String
+    let name: String
+    let createdAt: String
+    
+    enum CodingKeys: String, CodingKey {
+        case id, name
+        case createdAt = "created_at"
     }
 }
 
@@ -109,6 +134,7 @@ struct SavedPitch: Codable, Identifiable {
 // MARK: - Save Pitch Request
 
 struct SavePitchRequest: Codable {
+    let profileId: String?
     let pitchType: String
     let pitchSpeed: Double?
     let inducedVertBreak: Double?
@@ -128,6 +154,7 @@ struct SavePitchRequest: Codable {
     let notes: String?
     
     enum CodingKeys: String, CodingKey {
+        case profileId = "profile_id"
         case pitchType = "pitch_type"
         case pitchSpeed = "pitch_speed"
         case inducedVertBreak = "induced_vert_break"
@@ -147,8 +174,9 @@ struct SavePitchRequest: Codable {
     }
     
     /// Build from PitchData + Stuff+ result
-    static func from(pitchData: PitchData, result: StuffPlusResponse?) -> SavePitchRequest {
+    static func from(pitchData: PitchData, result: StuffPlusResponse?, profileId: String? = nil) -> SavePitchRequest {
         SavePitchRequest(
+            profileId: profileId,
             pitchType: pitchData.pitchType.rawValue,
             pitchSpeed: pitchData.pitchSpeed,
             inducedVertBreak: pitchData.inducedVertBreak,

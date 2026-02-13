@@ -72,6 +72,45 @@ struct LoginView: View {
                                 isSecure: false
                             )
                             .transition(.opacity.combined(with: .move(edge: .top)))
+                            
+                            // Account type: Personal vs Team
+                            VStack(alignment: .leading, spacing: 8) {
+                                Text("Account Type")
+                                    .font(.system(size: 13, weight: .medium))
+                                    .foregroundColor(.white.opacity(0.6))
+                                
+                                HStack(spacing: 0) {
+                                    Button(action: { authViewModel.accountType = "personal" }) {
+                                        HStack(spacing: 6) {
+                                            Image(systemName: "person.fill")
+                                            Text("Personal")
+                                                .font(.system(size: 14, weight: .medium))
+                                        }
+                                        .foregroundColor(authViewModel.accountType == "personal" ? .white : .white.opacity(0.5))
+                                        .frame(maxWidth: .infinity)
+                                        .padding(.vertical, 12)
+                                        .background(authViewModel.accountType == "personal" ? Color.white.opacity(0.15) : Color.clear)
+                                        .cornerRadius(10)
+                                    }
+                                    
+                                    Button(action: { authViewModel.accountType = "team" }) {
+                                        HStack(spacing: 6) {
+                                            Image(systemName: "person.3.fill")
+                                            Text("Team")
+                                                .font(.system(size: 14, weight: .medium))
+                                        }
+                                        .foregroundColor(authViewModel.accountType == "team" ? .white : .white.opacity(0.5))
+                                        .frame(maxWidth: .infinity)
+                                        .padding(.vertical, 12)
+                                        .background(authViewModel.accountType == "team" ? Color.white.opacity(0.15) : Color.clear)
+                                        .cornerRadius(10)
+                                    }
+                                }
+                                .padding(4)
+                                .background(Color.white.opacity(0.05))
+                                .cornerRadius(12)
+                            }
+                            .transition(.opacity.combined(with: .move(edge: .top)))
                         }
                         
                         formField(

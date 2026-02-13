@@ -94,13 +94,24 @@ def init_db():
                 email TEXT UNIQUE NOT NULL,
                 name TEXT NOT NULL,
                 password_hash TEXT NOT NULL,
+                account_type TEXT NOT NULL DEFAULT 'personal',
                 created_at TEXT NOT NULL
+            )
+        """)
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS profiles (
+                id TEXT PRIMARY KEY,
+                user_id TEXT NOT NULL,
+                name TEXT NOT NULL,
+                created_at TEXT NOT NULL,
+                FOREIGN KEY (user_id) REFERENCES users(id)
             )
         """)
         conn.execute("""
             CREATE TABLE IF NOT EXISTS pitches (
                 id TEXT PRIMARY KEY,
                 user_id TEXT NOT NULL,
+                profile_id TEXT,
                 pitch_type TEXT NOT NULL,
                 pitch_speed REAL,
                 induced_vert_break REAL,
@@ -119,9 +130,52 @@ def init_db():
                 stuff_plus_raw REAL,
                 notes TEXT,
                 created_at TEXT NOT NULL,
-                FOREIGN KEY (user_id) REFERENCES users(id)
+                FOREIGN KEY (user_id) REFERENCES users(id),
+                FOREIGN KEY (profile_id) REFERENCES profiles(id)
             )
         """)
+        conn.commit()
+    migrate_db()
+
+
+def migrate_db():
+    """Add new columns/tables and migrate existing data for existing deployments."""
+    with get_db() as conn:
+        # Add account_type to users if missing (existing DBs)
+        try:
+            conn.execute("ALTER TABLE users ADD COLUMN account_type TEXT DEFAULT 'personal'")
+            conn.commit()
+        except sqlite3.OperationalError:
+            pass  # Column already exists
+
+        # Add profile_id to pitches if missing
+        try:
+            conn.execute("ALTER TABLE pitches ADD COLUMN profile_id TEXT")
+            conn.commit()
+        except sqlite3.OperationalError:
+            pass
+
+        # Migrate: for users with no profile, create one and assign pitches (existing users → personal)
+        users = conn.execute("SELECT id, name FROM users").fetchall()
+        for user in users:
+            has_profile = conn.execute(
+                "SELECT 1 FROM profiles WHERE user_id = ? LIMIT 1", (user["id"],)
+            ).fetchone()
+            if not has_profile:
+                conn.execute(
+                    "UPDATE users SET account_type = 'personal' WHERE id = ?",
+                    (user["id"],),
+                )
+                profile_id = str(uuid.uuid4())
+                now = datetime.now(timezone.utc).isoformat()
+                conn.execute(
+                    "INSERT INTO profiles (id, user_id, name, created_at) VALUES (?, ?, ?, ?)",
+                    (profile_id, user["id"], user["name"], now),
+                )
+                conn.execute(
+                    "UPDATE pitches SET profile_id = ? WHERE user_id = ?",
+                    (profile_id, user["id"]),
+                )
         conn.commit()
 
 
@@ -224,6 +278,7 @@ class SignupRequest(BaseModel):
     email: str
     name: str
     password: str
+    account_type: str = "personal"  # "personal" | "team"
 
 class LoginRequest(BaseModel):
     email: str
@@ -233,6 +288,17 @@ class AuthResponse(BaseModel):
     token: str
     user_id: str
     email: str
+    name: str
+    account_type: str = "personal"
+    default_profile_id: Optional[str] = None  # For personal: the single profile id
+
+class ProfileResponse(BaseModel):
+    id: str
+    name: str
+    created_at: str
+
+
+class CreateProfileRequest(BaseModel):
     name: str
 
 # Pitch prediction
@@ -258,6 +324,7 @@ class PitchResponse(BaseModel):
 
 # Saved pitch
 class SavePitchRequest(BaseModel):
+    profile_id: Optional[str] = None  # Required for team; for personal, use default profile
     pitch_type: str
     pitch_speed: Optional[float] = None
     induced_vert_break: Optional[float] = None
@@ -328,23 +395,37 @@ async def signup(request: Request, req: SignupRequest):
         raise HTTPException(status_code=400, detail="Password must be at least 6 characters")
     if not req.email or "@" not in req.email:
         raise HTTPException(status_code=400, detail="Invalid email address")
+    account_type = (req.account_type or "personal").lower()
+    if account_type not in ("personal", "team"):
+        account_type = "personal"
 
     user_id = str(uuid.uuid4())
     hashed = hash_password(req.password)
     now = datetime.now(timezone.utc).isoformat()
+    default_profile_id = None
 
     with get_db() as conn:
         existing = conn.execute("SELECT id FROM users WHERE email = ?", (req.email.lower(),)).fetchone()
         if existing:
             raise HTTPException(status_code=409, detail="An account with this email already exists")
         conn.execute(
-            "INSERT INTO users (id, email, name, password_hash, created_at) VALUES (?, ?, ?, ?, ?)",
-            (user_id, req.email.lower(), req.name.strip(), hashed, now),
+            "INSERT INTO users (id, email, name, password_hash, account_type, created_at) VALUES (?, ?, ?, ?, ?, ?)",
+            (user_id, req.email.lower(), req.name.strip(), hashed, account_type, now),
         )
+        if account_type == "personal":
+            profile_id = str(uuid.uuid4())
+            conn.execute(
+                "INSERT INTO profiles (id, user_id, name, created_at) VALUES (?, ?, ?, ?)",
+                (profile_id, user_id, req.name.strip(), now),
+            )
+            default_profile_id = profile_id
         conn.commit()
 
     token = create_token(user_id, req.email.lower())
-    return AuthResponse(token=token, user_id=user_id, email=req.email.lower(), name=req.name.strip())
+    return AuthResponse(
+        token=token, user_id=user_id, email=req.email.lower(), name=req.name.strip(),
+        account_type=account_type, default_profile_id=default_profile_id,
+    )
 
 
 @app.post("/auth/login", response_model=AuthResponse)
@@ -352,27 +433,102 @@ async def signup(request: Request, req: SignupRequest):
 async def login(request: Request, req: LoginRequest):
     with get_db() as conn:
         user = conn.execute(
-            "SELECT id, email, name, password_hash FROM users WHERE email = ?",
+            "SELECT id, email, name, password_hash, account_type FROM users WHERE email = ?",
             (req.email.lower(),),
         ).fetchone()
 
     if not user or not verify_password(req.password, user["password_hash"]):
         raise HTTPException(status_code=401, detail="Invalid email or password")
 
+    account_type = (user["account_type"] or "personal")
+    default_profile_id = None
+    if account_type == "personal":
+        with get_db() as conn:
+            profile = conn.execute(
+                "SELECT id FROM profiles WHERE user_id = ? ORDER BY created_at ASC LIMIT 1",
+                (user["id"],),
+            ).fetchone()
+            if profile:
+                default_profile_id = profile["id"]
+            else:
+                profile_id = str(uuid.uuid4())
+                now = datetime.now(timezone.utc).isoformat()
+                conn.execute(
+                    "INSERT INTO profiles (id, user_id, name, created_at) VALUES (?, ?, ?, ?)",
+                    (profile_id, user["id"], user["name"], now),
+                )
+                conn.commit()
+                default_profile_id = profile_id
+
     token = create_token(user["id"], user["email"])
-    return AuthResponse(token=token, user_id=user["id"], email=user["email"], name=user["name"])
+    return AuthResponse(
+        token=token, user_id=user["id"], email=user["email"], name=user["name"],
+        account_type=account_type, default_profile_id=default_profile_id,
+    )
 
 
 @app.get("/auth/me")
 async def get_me(payload: dict = Depends(verify_token)):
     with get_db() as conn:
         user = conn.execute(
-            "SELECT id, email, name, created_at FROM users WHERE id = ?",
+            "SELECT id, email, name, account_type, created_at FROM users WHERE id = ?",
             (payload["sub"],),
         ).fetchone()
     if not user:
         raise HTTPException(status_code=404, detail="User not found")
-    return {"user_id": user["id"], "email": user["email"], "name": user["name"]}
+    account_type = user["account_type"] or "personal"
+    default_profile_id = None
+    if account_type == "personal":
+        profile = conn.execute(
+            "SELECT id FROM profiles WHERE user_id = ? ORDER BY created_at ASC LIMIT 1",
+            (user["id"],),
+        ).fetchone()
+        if profile:
+            default_profile_id = profile["id"]
+    return {
+        "user_id": user["id"],
+        "email": user["email"],
+        "name": user["name"],
+        "account_type": account_type,
+        "default_profile_id": default_profile_id,
+    }
+
+
+# ---------------------------------------------------------------------------
+# Profiles (for team accounts; personal has one auto-created)
+# ---------------------------------------------------------------------------
+
+@app.get("/profiles", response_model=list[ProfileResponse])
+async def get_profiles(payload: dict = Depends(verify_token)):
+    user_id = payload["sub"]
+    with get_db() as conn:
+        rows = conn.execute(
+            "SELECT id, name, created_at FROM profiles WHERE user_id = ? ORDER BY name ASC",
+            (user_id,),
+        ).fetchall()
+    return [
+        ProfileResponse(id=r["id"], name=r["name"], created_at=r["created_at"])
+        for r in rows
+    ]
+
+
+@app.post("/profiles", response_model=ProfileResponse, status_code=201)
+async def create_profile(
+    req: CreateProfileRequest,
+    payload: dict = Depends(verify_token),
+):
+    with get_db() as conn:
+        profile_id = str(uuid.uuid4())
+        now = datetime.now(timezone.utc).isoformat()
+        conn.execute(
+            "INSERT INTO profiles (id, user_id, name, created_at) VALUES (?, ?, ?, ?)",
+            (profile_id, payload["sub"], (req.name or "New Profile").strip(), now),
+        )
+        conn.commit()
+        row = conn.execute(
+            "SELECT id, name, created_at FROM profiles WHERE id = ?", (profile_id,)
+        ).fetchone()
+    return ProfileResponse(id=row["id"], name=row["name"], created_at=row["created_at"])
 
 
 # ---------------------------------------------------------------------------
@@ -430,15 +586,29 @@ async def save_pitch(req: SavePitchRequest, payload: dict = Depends(verify_token
     user_id = payload["sub"]
 
     with get_db() as conn:
+        profile_id = req.profile_id
+        if not profile_id:
+            profile = conn.execute(
+                "SELECT id FROM profiles WHERE user_id = ? ORDER BY created_at ASC LIMIT 1",
+                (user_id,),
+            ).fetchone()
+            if profile:
+                profile_id = profile["id"]
+        if profile_id:
+            owner = conn.execute(
+                "SELECT user_id FROM profiles WHERE id = ?", (profile_id,)
+            ).fetchone()
+            if not owner or owner["user_id"] != user_id:
+                raise HTTPException(status_code=403, detail="Invalid profile")
         conn.execute(
             """INSERT INTO pitches
-               (id, user_id, pitch_type, pitch_speed, induced_vert_break, horz_break,
+               (id, user_id, profile_id, pitch_type, pitch_speed, induced_vert_break, horz_break,
                 release_height, release_side, extension_ft, total_spin, tilt_string,
                 spin_axis, efficiency, active_spin, gyro, pitcher_hand,
                 stuff_plus, stuff_plus_raw, notes, created_at)
-               VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+               VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
             (
-                pitch_id, user_id, req.pitch_type, req.pitch_speed,
+                pitch_id, user_id, profile_id, req.pitch_type, req.pitch_speed,
                 req.induced_vert_break, req.horz_break, req.release_height,
                 req.release_side, req.extension_ft, req.total_spin,
                 req.tilt_string, req.spin_axis, req.efficiency, req.active_spin,
@@ -466,14 +636,19 @@ async def get_pitches(
     payload: dict = Depends(verify_token),
     limit: int = 50,
     offset: int = 0,
-    pitch_type: Optional[str] = None
+    pitch_type: Optional[str] = None,
+    profile_id: Optional[str] = None
 ):
-    """Get user's pitches with pagination and filtering."""
+    """Get user's pitches with pagination and filtering. When profile_id is provided, only returns pitches for that profile."""
     user_id = payload["sub"]
     
-    # Build query with optional pitch_type filter
+    # Build query with optional filters
     query = "SELECT * FROM pitches WHERE user_id = ?"
     params = [user_id]
+    
+    if profile_id:
+        query += " AND profile_id = ?"
+        params.append(profile_id)
     
     if pitch_type:
         query += " AND pitch_type = ?"
@@ -483,6 +658,12 @@ async def get_pitches(
     params.extend([limit, offset])
     
     with get_db() as conn:
+        if profile_id:
+            owner = conn.execute(
+                "SELECT user_id FROM profiles WHERE id = ?", (profile_id,)
+            ).fetchone()
+            if not owner or owner["user_id"] != user_id:
+                raise HTTPException(status_code=403, detail="Invalid profile")
         rows = conn.execute(query, params).fetchall()
     return [
         SavedPitchResponse(

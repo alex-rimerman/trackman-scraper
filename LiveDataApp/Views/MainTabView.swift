@@ -3,6 +3,11 @@ import SwiftUI
 struct MainTabView: View {
     @ObservedObject var authViewModel: AuthViewModel
     @State private var selectedTab = 0
+    @State private var showProfileSelector = false
+    
+    private var needsProfileSelection: Bool {
+        AuthService.accountType == "team" && AuthService.currentProfileId == nil
+    }
     
     var body: some View {
         TabView(selection: $selectedTab) {
@@ -29,5 +34,13 @@ struct MainTabView: View {
         }
         .tint(Color(red: 0.53, green: 0.81, blue: 0.92))
         .preferredColorScheme(.dark)
+        .onAppear {
+            if needsProfileSelection {
+                showProfileSelector = true
+            }
+        }
+        .fullScreenCover(isPresented: $showProfileSelector) {
+            ProfilesView(authViewModel: authViewModel, isBlocking: true)
+        }
     }
 }

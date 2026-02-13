@@ -63,7 +63,8 @@ class PitchAnalysisViewModel: ObservableObject {
             
             // Auto-save to backend if logged in
             if AuthService.isLoggedIn {
-                let saveReq = SavePitchRequest.from(pitchData: pitchData, result: result)
+                let profileId = AuthService.currentProfileId ?? AuthService.defaultProfileId
+                let saveReq = SavePitchRequest.from(pitchData: pitchData, result: result, profileId: profileId)
                 do {
                     _ = try await AuthService.savePitch(saveReq)
                     saveSuccessMessage = "Pitch saved to History"
