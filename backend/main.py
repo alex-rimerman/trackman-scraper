@@ -573,7 +573,7 @@ async def predict_stuff_plus(request: Request, pitch_request: PitchRequest):
         return PitchResponse(
             stuff_plus=round(final_stuff, 1),
             stuff_plus_raw=round(final_stuff, 1),
-            velocity_penalty=0,
+            velocity_penalty=0, 
         )
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Prediction failed: {str(e)}")
