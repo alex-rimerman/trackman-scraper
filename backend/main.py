@@ -254,7 +254,7 @@ def velocity_penalty(pitch_type: str, avg_velo: float, pfx_z_inches: float, stuf
         if avg_velo < 90:
             capped_stuff = min(capped_stuff, 105)
     elif pitch_type in ("CU", "KC", "ST"):
-        avg_mlb = 77
+        avg_mlb = 75
         if avg_velo < avg_mlb:
             penalty = (avg_mlb - avg_velo) * 1.0
     elif pitch_type in ("SL", "FC"):
@@ -321,6 +321,10 @@ class PitchResponse(BaseModel):
     stuff_plus: float
     stuff_plus_raw: float
     velocity_penalty: float
+
+
+class SuggestResponse(BaseModel):
+    suggestion: str
 
 # Saved pitch
 class SavePitchRequest(BaseModel):
@@ -536,7 +540,7 @@ async def create_profile(
 # ---------------------------------------------------------------------------
 
 @app.post("/predict", response_model=PitchResponse)
-@limiter.limit("100/hour")
+@limiter.limit("300/hour")
 async def predict_stuff_plus(request: Request, pitch_request: PitchRequest):
     if model_college is None:
         raise HTTPException(status_code=503, detail="Stuff+ model not loaded")
@@ -568,11 +572,115 @@ async def predict_stuff_plus(request: Request, pitch_request: PitchRequest):
         final_stuff = float(np.clip(adjusted_stuff, 60, 140))
         return PitchResponse(
             stuff_plus=round(final_stuff, 1),
-            stuff_plus_raw=round(raw_stuff, 1),
-            velocity_penalty=round(penalty, 1),
+            stuff_plus_raw=round(final_stuff, 1),
+            velocity_penalty=0,
         )
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Prediction failed: {str(e)}")
+
+
+def _run_prediction(
+    pitch_type: str,
+    release_speed: float,
+    pfx_x: float,
+    pfx_z: float,
+    release_extension: float,
+    release_spin_rate: float,
+    spin_axis: float,
+    release_pos_x: float,
+    release_pos_z: float,
+    p_throws: str,
+    fb_velo: float,
+    fb_ivb: float,
+    fb_hmov: float,
+) -> float:
+    """Run a single Stuff+ prediction; returns final stuff_plus value."""
+    if model_college is None:
+        return 0.0
+    raw_stuff = model_college.predict_single_pitch(
+        pitch_type=pitch_type,
+        release_speed=release_speed,
+        pfx_x=pfx_x,
+        pfx_z=pfx_z,
+        release_extension=release_extension,
+        release_spin_rate=release_spin_rate,
+        spin_axis=spin_axis,
+        release_pos_x=release_pos_x,
+        release_pos_z=release_pos_z,
+        p_throws=p_throws,
+        fb_velo=fb_velo,
+        fb_ivb=fb_ivb,
+        fb_hmov=fb_hmov,
+    )
+    pfx_z_inches = pfx_z * 12
+    adjusted_stuff, _ = velocity_penalty(
+        pitch_type, release_speed, pfx_z_inches, raw_stuff
+    )
+    return float(np.clip(adjusted_stuff, 60, 140))
+
+
+@app.post("/predict/suggest", response_model=SuggestResponse)
+@limiter.limit("100/hour")
+async def suggest_improvement(request: Request, pitch_request: PitchRequest):
+    """Run variations (+1 mph, ±1" IVB, ±1" HB, ±1 mph, ±100 rpm) and suggest what would most improve Stuff+."""
+    if model_college is None:
+        raise HTTPException(status_code=503, detail="Stuff+ model not loaded")
+    valid_types = {"FF", "SI", "FC", "SL", "CU", "CH", "ST", "FS", "KC"}
+    if pitch_request.pitch_type not in valid_types:
+        raise HTTPException(status_code=400, detail=f"Invalid pitch type '{pitch_request.pitch_type}'")
+    if pitch_request.p_throws not in ("R", "L"):
+        raise HTTPException(status_code=400, detail="p_throws must be 'R' or 'L'")
+
+    base = pitch_request
+    inch_to_ft = 1.0 / 12.0
+
+    def run(mod_speed=0, mod_pfx_x=0, mod_pfx_z=0, mod_spin=0):
+        return _run_prediction(
+            base.pitch_type,
+            base.release_speed + mod_speed,
+            base.pfx_x + mod_pfx_x,
+            base.pfx_z + mod_pfx_z,
+            base.release_extension,
+            base.release_spin_rate + mod_spin,
+            base.spin_axis,
+            base.release_pos_x,
+            base.release_pos_z,
+            base.p_throws,
+            base.fb_velo,
+            base.fb_ivb,
+            base.fb_hmov,
+        )
+
+    variations = [
+        (+1, 0, 0, 0, "adding 1 mph"),
+        (0, 0, inch_to_ft, 0, "adding 1\" IVB"),
+        (0, 0, -inch_to_ft, 0, "subtracting 1\" IVB"),
+        (0, inch_to_ft, 0, 0, "adding 1\" HB"),
+        (0, -inch_to_ft, 0, 0, "subtracting 1\" HB"),
+        (-1, 0, 0, 0, "subtracting 1 mph"),
+        (0, 0, 0, 100, "adding 100 rpm spin"),
+        (0, 0, 0, -100, "subtracting 100 rpm spin"),
+    ]
+
+    baseline = run()
+    best_improvement = 0.0
+    best_suggestion = None
+
+    for mod_speed, mod_pfx_x, mod_pfx_z, mod_spin, label in variations:
+        score = run(mod_speed, mod_pfx_x, mod_pfx_z, mod_spin)
+        improvement = score - baseline
+        if improvement > best_improvement:
+            best_improvement = improvement
+            best_suggestion = label
+
+    if best_suggestion and best_improvement > 0:
+        suggestion = f"To improve Stuff+: try {best_suggestion} (+{best_improvement:.1f})"
+    elif best_suggestion:
+        suggestion = f"Current Stuff+ is near optimal. Small gains possible: try {best_suggestion}."
+    else:
+        suggestion = "Current Stuff+ looks strong for this pitch."
+
+    return SuggestResponse(suggestion=suggestion)
 
 
 # ---------------------------------------------------------------------------

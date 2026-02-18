@@ -45,6 +45,90 @@ class StuffPlusService {
         return try await postRequest(endpoint: "/predict", body: request)
     }
     
+    /// Predict Stuff+ with optional adjustments (for "what if" sliders)
+    struct Adjustments {
+        var velo: Double = 0      // -1 to +1 mph
+        var ivb: Double = 0       // -1 to +1 inches
+        var hb: Double = 0        // -1 to +1 inches
+        var spin: Double = 0      // -100 to +100 rpm
+    }
+    
+    static func calculateStuffPlus(
+        for pitchData: PitchData,
+        adjustments: Adjustments = Adjustments()
+    ) async throws -> StuffPlusResponse {
+        guard let speed = pitchData.pitchSpeed,
+              let pfxX = pitchData.pfxX,
+              let pfxZ = pitchData.pfxZ,
+              let ext = pitchData.extensionFt,
+              let spin = pitchData.totalSpin,
+              let spinAxis = pitchData.computedSpinAxis,
+              let relX = pitchData.releasePosX,
+              let relZ = pitchData.releaseHeight,
+              let fbVelo = pitchData.fbVeloForModel,
+              let fbIvb = pitchData.fbIVBForModel,
+              let fbHmov = pitchData.fbHMovForModel else {
+            throw StuffPlusError.missingData("Not all required pitch data fields are available")
+        }
+        
+        let inchToFt = 1.0 / 12.0
+        let request = StuffPlusRequest(
+            pitchType: pitchData.pitchType.rawValue,
+            releaseSpeed: speed + adjustments.velo,
+            pfxX: pfxX + (adjustments.hb * -inchToFt),
+            pfxZ: pfxZ + (adjustments.ivb * inchToFt),
+            releaseExtension: ext,
+            releaseSpinRate: spin + adjustments.spin,
+            spinAxis: spinAxis,
+            releasePosX: relX,
+            releasePosZ: relZ,
+            pThrows: pitchData.pitcherHand.rawValue,
+            fbVelo: fbVelo + adjustments.velo,
+            fbIvb: fbIvb + (adjustments.ivb * inchToFt),
+            fbHmov: fbHmov + (adjustments.hb * -inchToFt)
+        )
+        
+        return try await postRequest(endpoint: "/predict", body: request)
+    }
+    
+    static func getImprovementSuggestion(for pitchData: PitchData) async throws -> String {
+        guard let speed = pitchData.pitchSpeed,
+              let pfxX = pitchData.pfxX,
+              let pfxZ = pitchData.pfxZ,
+              let ext = pitchData.extensionFt,
+              let spin = pitchData.totalSpin,
+              let spinAxis = pitchData.computedSpinAxis,
+              let relX = pitchData.releasePosX,
+              let relZ = pitchData.releaseHeight,
+              let fbVelo = pitchData.fbVeloForModel,
+              let fbIvb = pitchData.fbIVBForModel,
+              let fbHmov = pitchData.fbHMovForModel else {
+            throw StuffPlusError.missingData("Not all required pitch data fields are available")
+        }
+        
+        let request = StuffPlusRequest(
+            pitchType: pitchData.pitchType.rawValue,
+            releaseSpeed: speed,
+            pfxX: pfxX,
+            pfxZ: pfxZ,
+            releaseExtension: ext,
+            releaseSpinRate: spin,
+            spinAxis: spinAxis,
+            releasePosX: relX,
+            releasePosZ: relZ,
+            pThrows: pitchData.pitcherHand.rawValue,
+            fbVelo: fbVelo,
+            fbIvb: fbIvb,
+            fbHmov: fbHmov
+        )
+        
+        struct SuggestResponse: Codable {
+            let suggestion: String
+        }
+        let response: SuggestResponse = try await postRequest(endpoint: "/predict/suggest", body: request)
+        return response.suggestion
+    }
+    
     static func healthCheck() async -> Bool {
         guard let url = URL(string: "\(baseURL)/health") else { return false }
         do {

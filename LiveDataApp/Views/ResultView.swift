@@ -5,6 +5,14 @@ struct ResultView: View {
     @State private var shareImage: Image?
     @State private var showShareSheet = false
     
+    // What-if sliders (continuous adjustments)
+    @State private var veloAdj: Double = 0
+    @State private var ivbAdj: Double = 0
+    @State private var hbAdj: Double = 0
+    @State private var spinAdj: Double = 0
+    @State private var projectedStuffPlus: Double?
+    @State private var isFetchingProjected = false
+    
     var body: some View {
         ScrollView {
             VStack(spacing: 24) {
@@ -61,6 +69,9 @@ struct ResultView: View {
                             .stroke(stuffPlusColor(for: result.stuffPlus).opacity(0.3), lineWidth: 1.5)
                     )
                     .padding(.horizontal, 20)
+                    
+                    // What-if adjustments
+                    whatIfSection(result: result)
                     
                     VStack(spacing: 12) {
                         sectionHeader("Pitch Data", icon: "baseball")
@@ -235,6 +246,122 @@ struct ResultView: View {
     
     private func shareResult() {
         showShareSheet = true
+    }
+    
+    @ViewBuilder
+    private func whatIfSection(result: StuffPlusResponse) -> some View {
+        let hasAdjustment = veloAdj != 0 || ivbAdj != 0 || hbAdj != 0 || spinAdj != 0
+        
+        VStack(spacing: 16) {
+            sectionHeader("What If", icon: "checkmark.circle")
+            
+            Text("Check what you’d add to see the projected Stuff+:")
+                .font(.caption)
+                .foregroundColor(.white.opacity(0.6))
+                .frame(maxWidth: .infinity, alignment: .leading)
+            
+            VStack(spacing: 16) {
+                adjustmentSlider("Velocity", value: $veloAdj, range: -1...1, unit: "mph", step: 0.1)
+                adjustmentSlider("IVB", value: $ivbAdj, range: -1...1, unit: "in", step: 0.1)
+                adjustmentSlider("Horizontal Break", value: $hbAdj, range: -1...1, unit: "in", step: 0.1)
+                adjustmentSlider("Spin", value: $spinAdj, range: -100...100, unit: "rpm", step: 10)
+            }
+            
+            Button(action: { fetchProjectedStuffPlus() }) {
+                HStack {
+                    if isFetchingProjected {
+                        ProgressView()
+                            .progressViewStyle(CircularProgressViewStyle(tint: .white))
+                        Text("Calculating...")
+                    } else {
+                        Text("Done")
+                            .fontWeight(.semibold)
+                    }
+                }
+                .font(.subheadline)
+                .foregroundColor(.white)
+                .frame(maxWidth: .infinity)
+                .padding(.vertical, 12)
+                .background(hasAdjustment ? Color(red: 0.53, green: 0.81, blue: 0.92) : Color.gray.opacity(0.5))
+                .cornerRadius(10)
+            }
+            .disabled(!hasAdjustment || isFetchingProjected)
+            
+            if let projected = projectedStuffPlus {
+                HStack(spacing: 8) {
+                    Text("Projected Stuff+:")
+                        .font(.subheadline)
+                        .foregroundColor(.white.opacity(0.7))
+                    Text("\(Int(projected))")
+                        .font(.system(size: 20, weight: .bold, design: .rounded))
+                        .foregroundColor(stuffPlusColor(for: projected))
+                }
+                .padding(.vertical, 8)
+            }
+        }
+        .padding(16)
+        .background(Color.white.opacity(0.05))
+        .cornerRadius(14)
+        .padding(.horizontal, 16)
+        .onChange(of: viewModel.stuffPlusResult?.stuffPlus) { _, _ in
+            veloAdj = 0
+            ivbAdj = 0
+            hbAdj = 0
+            spinAdj = 0
+            projectedStuffPlus = nil
+        }
+    }
+    
+    private func adjustmentSlider(_ label: String, value: Binding<Double>, range: ClosedRange<Double>, unit: String, step: Double) -> some View {
+        let decimals = step >= 1 ? 0 : 1
+        let format = decimals == 0 ? "%+.0f %@" : "%+.1f %@"
+        return VStack(alignment: .leading, spacing: 6) {
+            HStack {
+                Text(label)
+                    .font(.subheadline)
+                    .foregroundColor(.white.opacity(0.8))
+                Spacer()
+                Text(String(format: format, value.wrappedValue, unit))
+                    .font(.subheadline.monospacedDigit())
+                    .foregroundColor(Color(red: 0.53, green: 0.81, blue: 0.92))
+            }
+            Slider(value: value, in: range, step: step)
+                .tint(Color(red: 0.53, green: 0.81, blue: 0.92))
+        }
+    }
+    
+    private func fetchProjectedStuffPlus() {
+        let velo = veloAdj
+        let ivb = ivbAdj
+        let hb = hbAdj
+        let spin = spinAdj
+        
+        guard velo != 0 || ivb != 0 || hb != 0 || spin != 0 else {
+            projectedStuffPlus = nil
+            return
+        }
+        
+        isFetchingProjected = true
+        projectedStuffPlus = nil
+        
+        Task {
+            let adjustments = StuffPlusService.Adjustments(
+                velo: velo,
+                ivb: ivb,
+                hb: hb,
+                spin: spin
+            )
+            do {
+                let result = try await StuffPlusService.calculateStuffPlus(
+                    for: viewModel.pitchData,
+                    adjustments: adjustments
+                )
+                projectedStuffPlus = result.stuffPlus
+            } catch {
+                projectedStuffPlus = nil
+            }
+            isFetchingProjected = false
+        }
     }
     
     private func sectionHeader(_ title: String, icon: String) -> some View {
