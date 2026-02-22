@@ -1,7 +1,10 @@
 import SwiftUI
+import UniformTypeIdentifiers
 
 struct HistoryView: View {
     @ObservedObject var authViewModel: AuthViewModel
+    var onPDFUploadComplete: ((Set<String>) -> Void)?
+    
     @State private var pitches: [SavedPitch] = []
     @State private var isLoading = false
     @State private var errorMessage: String?
@@ -9,6 +12,9 @@ struct HistoryView: View {
     @State private var selectedFilter: String?
     @State private var showFilterMenu = false
     @State private var showProfilesSheet = false
+    @State private var showDocumentPicker = false
+    @State private var isImportingPDF = false
+    @State private var importProgressMessage: String?
     
     var body: some View {
         ZStack {
@@ -46,6 +52,16 @@ struct HistoryView: View {
                     Spacer()
                     
                     HStack(spacing: 12) {
+                        // Upload PDF button
+                        Button(action: { showDocumentPicker = true }) {
+                            Image(systemName: "doc.badge.plus")
+                                .font(.system(size: 20))
+                                .foregroundColor(.white.opacity(0.7))
+                                .padding(8)
+                                .background(Color.white.opacity(0.1))
+                                .cornerRadius(10)
+                        }
+                        
                         // Filter button
                         Menu {
                             Button(action: {
@@ -119,17 +135,27 @@ struct HistoryView: View {
                     Spacer()
                 } else if pitches.isEmpty {
                     Spacer()
-                    VStack(spacing: 16) {
+                    VStack(spacing: 20) {
                         Image(systemName: "baseball")
                             .font(.system(size: 48))
                             .foregroundColor(.white.opacity(0.3))
                         Text("No pitches yet")
                             .font(.headline)
                             .foregroundColor(.white.opacity(0.5))
-                        Text("Analyze a pitch in the Analyzer tab\nand it'll show up here automatically")
+                        Text("Analyze a pitch in the Analyzer tab\nor upload a Trackman PDF report")
                             .font(.subheadline)
                             .foregroundColor(.white.opacity(0.3))
                             .multilineTextAlignment(.center)
+                        Button(action: { showDocumentPicker = true }) {
+                            Label("Upload Trackman PDF", systemImage: "doc.badge.plus")
+                                .font(.subheadline.weight(.medium))
+                                .foregroundColor(.white)
+                                .padding(.horizontal, 20)
+                                .padding(.vertical, 12)
+                                .background(Color(red: 0.53, green: 0.81, blue: 0.92))
+                                .cornerRadius(12)
+                        }
+                        .padding(.top, 8)
                     }
                     Spacer()
                 } else {
@@ -188,6 +214,27 @@ struct HistoryView: View {
         }
         .sheet(isPresented: $showProfilesSheet) {
             ProfilesView(authViewModel: authViewModel)
+        }
+        .fileImporter(
+            isPresented: $showDocumentPicker,
+            allowedContentTypes: [.pdf],
+            allowsMultipleSelection: false
+        ) { result in
+            handlePDFImport(result: result)
+        }
+        .overlay {
+            if isImportingPDF {
+                Color.black.opacity(0.5)
+                    .ignoresSafeArea()
+                VStack(spacing: 16) {
+                    ProgressView()
+                        .progressViewStyle(CircularProgressViewStyle(tint: .white))
+                        .scaleEffect(1.5)
+                    Text(importProgressMessage ?? "Importing...")
+                        .font(.subheadline)
+                        .foregroundColor(.white)
+                }
+            }
         }
     }
     
@@ -260,6 +307,75 @@ struct HistoryView: View {
             Text(label)
                 .font(.system(size: 9))
                 .foregroundColor(.white.opacity(0.4))
+        }
+    }
+    
+    // MARK: - PDF Import
+    
+    private func handlePDFImport(result: Result<[URL], Error>) {
+        Task {
+            isImportingPDF = true
+            importProgressMessage = "Opening PDF..."
+            defer {
+                isImportingPDF = false
+                importProgressMessage = nil
+            }
+            
+            do {
+                guard case .success(let urls) = result, let url = urls.first else {
+                    return
+                }
+                guard url.startAccessingSecurityScopedResource() else {
+                    errorMessage = "Could not access the selected file"
+                    return
+                }
+                defer { url.stopAccessingSecurityScopedResource() }
+                
+                importProgressMessage = "Parsing Trackman report..."
+                let parsed = try TrackmanPDFParser.parseAverages(from: url)
+                
+                importProgressMessage = "Saving \(parsed.count) pitches..."
+                var savedIds: Set<String> = []
+                let profileId = AuthService.currentProfileId ?? AuthService.defaultProfileId
+                let fbRef = parsed.first { ["FF", "SI"].contains($0.pitchTypeCode) }
+                
+                for avg in parsed {
+                    let hand = avg.releaseSide < 0 ? "L" : "R"
+                    var stuffPlus: Double?
+                    var stuffPlusRaw: Double?
+                    if let result = try? await StuffPlusService.calculateStuffPlus(for: avg, hand: hand, fastballRef: fbRef) {
+                        stuffPlus = result.stuffPlus
+                        stuffPlusRaw = result.stuffPlusRaw
+                    }
+                    let req = SavePitchRequest(
+                        profileId: profileId,
+                        pitchType: avg.pitchTypeCode,
+                        pitchSpeed: avg.pitchSpeed,
+                        inducedVertBreak: avg.inducedVertBreak,
+                        horzBreak: avg.horzBreak,
+                        releaseHeight: avg.releaseHeight,
+                        releaseSide: avg.releaseSide,
+                        extensionFt: avg.extensionFt,
+                        totalSpin: avg.totalSpin,
+                        tiltString: nil,
+                        spinAxis: PitchData.spinAxisFromMovement(ivb: avg.inducedVertBreak, hb: avg.horzBreak),
+                        efficiency: nil,
+                        activeSpin: nil,
+                        gyro: nil,
+                        pitcherHand: hand,
+                        stuffPlus: stuffPlus,
+                        stuffPlusRaw: stuffPlusRaw,
+                        notes: "Imported from Trackman PDF"
+                    )
+                    let saved = try await AuthService.savePitch(req)
+                    savedIds.insert(saved.id)
+                }
+                
+                await loadPitches()
+                onPDFUploadComplete?(savedIds)
+            } catch {
+                errorMessage = error.localizedDescription
+            }
         }
     }
     

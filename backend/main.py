@@ -62,7 +62,12 @@ def hash_password(password: str) -> str:
 def verify_password(password: str, hashed: str) -> bool:
     return bcrypt.checkpw(password.encode("utf-8"), hashed.encode("utf-8"))
 
-DB_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "livedata.db")
+# Use Railway volume for persistence when deployed (survives redeploys)
+_db_dir = os.environ.get("RAILWAY_VOLUME_MOUNT_PATH")
+if _db_dir:
+    DB_PATH = os.path.join(_db_dir, "livedata.db")
+else:
+    DB_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "livedata.db")
 
 app = FastAPI(
     title="Developing Baseball API",

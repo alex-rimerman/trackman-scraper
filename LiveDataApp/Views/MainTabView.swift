@@ -4,6 +4,7 @@ struct MainTabView: View {
     @ObservedObject var authViewModel: AuthViewModel
     @State private var selectedTab = 0
     @State private var showProfileSelector = false
+    @State private var pendingReportPitchIds: Set<String>?
     
     private var needsProfileSelection: Bool {
         AuthService.accountType == "team" && AuthService.currentProfileId == nil
@@ -18,14 +19,17 @@ struct MainTabView: View {
                 }
                 .tag(0)
             
-            HistoryView(authViewModel: authViewModel)
+            HistoryView(authViewModel: authViewModel, onPDFUploadComplete: { ids in
+                pendingReportPitchIds = ids
+                selectedTab = 2
+            })
                 .tabItem {
                     Image(systemName: "clock.arrow.circlepath")
                     Text("History")
                 }
                 .tag(1)
             
-            ReportView(authViewModel: authViewModel)
+            ReportView(authViewModel: authViewModel, initialPitchIdsToSelect: $pendingReportPitchIds)
                 .tabItem {
                     Image(systemName: "folder.fill")
                     Text("Report")

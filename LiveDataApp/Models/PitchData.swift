@@ -60,11 +60,13 @@ struct PitchData: Codable, Identifiable {
         return rs * -1.0
     }
     
-    /// Compute spin axis from tilt string (clock format → degrees)
+    /// Compute spin axis from tilt string (clock format → degrees).
+    /// When tilt is missing, falls back to inferring from movement (IVB, HB) using clock mapping:
+    /// 20 vert / 0 horiz → 12:00, 12/12 → 1:30, 0/12 → 3:00, -12/12 → 4:30, etc.
     var computedSpinAxis: Double? {
         if let sa = spinAxis { return sa }
-        guard let tilt = tiltString else { return nil }
-        return PitchData.tiltToSpinAxis(tilt)
+        if let tilt = tiltString, let axis = PitchData.tiltToSpinAxis(tilt) { return axis }
+        return PitchData.spinAxisFromMovement(ivb: inducedVertBreak, hb: horzBreak)
     }
     
     /// Fastball velo for model input (defaults to pitch speed if this IS a fastball)
@@ -117,7 +119,17 @@ struct PitchData: Codable, Identifiable {
         return missing
     }
     
-    // MARK: - Tilt → Spin Axis Conversion
+    // MARK: - Tilt & Movement → Spin Axis
+    
+    /// Infer spin axis from movement when tilt is missing.
+    /// Maps (IVB, HB) to clock: 20 vert / 0 horiz = 12:00, 12/12 = 1:30, 0/12 = 3:00, -12/12 = 4:30.
+    static func spinAxisFromMovement(ivb: Double?, hb: Double?) -> Double? {
+        guard let ivb = ivb, let hb = hb else { return nil }
+        let angleFrom12 = atan2(hb, ivb) * 180.0 / Double.pi
+        let normalized = angleFrom12 >= 0 ? angleFrom12 : angleFrom12 + 360.0
+        let spinAxis = (180.0 + normalized).truncatingRemainder(dividingBy: 360.0)
+        return spinAxis
+    }
     
     /// Convert clock-face tilt (e.g. "10:45") to spin axis degrees
     /// - 12:00 → 180° (pure backspin)

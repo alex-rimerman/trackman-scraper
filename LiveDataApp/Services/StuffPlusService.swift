@@ -91,6 +91,48 @@ class StuffPlusService {
         return try await postRequest(endpoint: "/predict", body: request)
     }
     
+    /// Calculate Stuff+ for a parsed PDF pitch (from Trackman session report averages).
+    static func calculateStuffPlus(
+        for parsed: TrackmanPDFParser.ParsedPitchAverage,
+        hand: String,
+        fastballRef: TrackmanPDFParser.ParsedPitchAverage?
+    ) async throws -> StuffPlusResponse {
+        let inchToFt = 1.0 / 12.0
+        let spinAxis = PitchData.spinAxisFromMovement(ivb: parsed.inducedVertBreak, hb: parsed.horzBreak) ?? 180.0
+        
+        let fbVelo: Double
+        let fbIvb: Double
+        let fbHmov: Double
+        if ["FF", "SI"].contains(parsed.pitchTypeCode) {
+            fbVelo = parsed.pitchSpeed
+            fbIvb = parsed.inducedVertBreak * inchToFt
+            fbHmov = (parsed.horzBreak * -1.0) * inchToFt
+        } else if let fb = fastballRef {
+            fbVelo = fb.pitchSpeed
+            fbIvb = fb.inducedVertBreak * inchToFt
+            fbHmov = (fb.horzBreak * -1.0) * inchToFt
+        } else {
+            throw StuffPlusError.missingData("Fastball reference needed for \(parsed.pitchTypeCode)")
+        }
+        
+        let request = StuffPlusRequest(
+            pitchType: parsed.pitchTypeCode,
+            releaseSpeed: parsed.pitchSpeed,
+            pfxX: (parsed.horzBreak * -1.0) * inchToFt,
+            pfxZ: parsed.inducedVertBreak * inchToFt,
+            releaseExtension: parsed.extensionFt,
+            releaseSpinRate: parsed.totalSpin,
+            spinAxis: spinAxis,
+            releasePosX: parsed.releaseSide * -1.0,
+            releasePosZ: parsed.releaseHeight,
+            pThrows: hand,
+            fbVelo: fbVelo,
+            fbIvb: fbIvb,
+            fbHmov: fbHmov
+        )
+        return try await postRequest(endpoint: "/predict", body: request)
+    }
+    
     static func getImprovementSuggestion(for pitchData: PitchData) async throws -> String {
         guard let speed = pitchData.pitchSpeed,
               let pfxX = pitchData.pfxX,

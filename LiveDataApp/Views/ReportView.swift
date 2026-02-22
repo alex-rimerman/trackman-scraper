@@ -5,6 +5,8 @@ import Charts
 
 struct ReportView: View {
     @ObservedObject var authViewModel: AuthViewModel
+    @Binding var initialPitchIdsToSelect: Set<String>?
+    
     @State private var allPitches: [SavedPitch] = []
     @State private var selectedPitchIDs: Set<String> = []
     @State private var isLoading = false
@@ -32,7 +34,14 @@ struct ReportView: View {
                 }
             }
         }
-        .task(id: AuthService.currentProfileId ?? "") { await loadPitches() }
+        .task(id: AuthService.currentProfileId ?? "") {
+            await loadPitches()
+            if let ids = initialPitchIdsToSelect, !ids.isEmpty {
+                selectedPitchIDs = ids
+                showReport = true
+                initialPitchIdsToSelect = nil
+            }
+        }
         .sheet(isPresented: $showShareSheet) {
             if let image = shareImage {
                 ShareSheet(items: [image])

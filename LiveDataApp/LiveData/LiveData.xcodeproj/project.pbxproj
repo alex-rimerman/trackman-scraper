@@ -11,6 +11,7 @@
 		8DABA6F82F36A0500020EB72 /* PitchData.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8DABA6E72F36A0500020EB72 /* PitchData.swift */; };
 		8DABA6F92F36A0500020EB72 /* StuffPlusService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8DABA6E92F36A0500020EB72 /* StuffPlusService.swift */; };
 		8DABA6FA2F36A0500020EB72 /* TrackmanOCR.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8DABA6EA2F36A0500020EB72 /* TrackmanOCR.swift */; };
+		8DABA8102F36A0500020EB72 /* TrackmanPDFParser.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8DABA8112F36A0500020EB72 /* TrackmanPDFParser.swift */; };
 		8DABA6FB2F36A0500020EB72 /* PitchAnalysisViewModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8DABA6EC2F36A0500020EB72 /* PitchAnalysisViewModel.swift */; };
 		8DABA6FC2F36A0500020EB72 /* CaptureView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8DABA6EE2F36A0500020EB72 /* CaptureView.swift */; };
 		8DABA6FD2F36A0500020EB72 /* ContentView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8DABA6EF2F36A0500020EB72 /* ContentView.swift */; };
@@ -54,6 +55,7 @@
 		8DABA6E72F36A0500020EB72 /* PitchData.swift */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.swift; path = PitchData.swift; sourceTree = "<group>"; };
 		8DABA6E92F36A0500020EB72 /* StuffPlusService.swift */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.swift; path = StuffPlusService.swift; sourceTree = "<group>"; };
 		8DABA6EA2F36A0500020EB72 /* TrackmanOCR.swift */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.swift; path = TrackmanOCR.swift; sourceTree = "<group>"; };
+		8DABA8112F36A0500020EB72 /* TrackmanPDFParser.swift */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.swift; path = TrackmanPDFParser.swift; sourceTree = "<group>"; };
 		8DABA6EC2F36A0500020EB72 /* PitchAnalysisViewModel.swift */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.swift; path = PitchAnalysisViewModel.swift; sourceTree = "<group>"; };
 		8DABA6EE2F36A0500020EB72 /* CaptureView.swift */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.swift; path = CaptureView.swift; sourceTree = "<group>"; };
 		8DABA6EF2F36A0500020EB72 /* ContentView.swift */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.swift; path = ContentView.swift; sourceTree = "<group>"; };
@@ -145,6 +147,7 @@
 			children = (
 				8DABA6E92F36A0500020EB72 /* StuffPlusService.swift */,
 				8DABA6EA2F36A0500020EB72 /* TrackmanOCR.swift */,
+				8DABA8112F36A0500020EB72 /* TrackmanPDFParser.swift */,
 				8DABA7022F36A0500020EB72 /* AuthService.swift */,
 			);
 			path = Services;
@@ -334,6 +337,7 @@
 			files = (
 				8DABA6F82F36A0500020EB72 /* PitchData.swift in Sources */,
 				8DABA6FA2F36A0500020EB72 /* TrackmanOCR.swift in Sources */,
+				8DABA8102F36A0500020EB72 /* TrackmanPDFParser.swift in Sources */,
 				8DABA6FD2F36A0500020EB72 /* ContentView.swift in Sources */,
 				8DABA6F72F36A0500020EB72 /* LiveDataApp.swift in Sources */,
 				8DABA6FB2F36A0500020EB72 /* PitchAnalysisViewModel.swift in Sources */,

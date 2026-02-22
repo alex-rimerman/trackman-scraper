@@ -41,7 +41,14 @@ openssl rand -base64 64 | tr -d '\n'
    - Click "Variables"
    - Add `JWT_SECRET` with your generated secret
 
-4. **Verify deployment:**
+4. **Add a persistent volume (required for pitch history):**
+   - Without this, pitch history is wiped on every redeploy.
+   - In Railway: right-click the project canvas → "Add Volume" (or use Command Palette ⌘K)
+   - Connect the volume to your backend service
+   - Set the mount path to `/data` (or any path—the app uses `RAILWAY_VOLUME_MOUNT_PATH` automatically)
+   - Redeploy so the volume is attached
+
+5. **Verify deployment:**
    - Check the deployment logs
    - Visit `https://your-app.up.railway.app/health`
    - Should return: `{"status":"healthy","model_loaded":true}`
@@ -74,15 +81,11 @@ For iOS-only apps, you can keep `["*"]` but consider adding rate limiting.
 
 - **Health check:** `GET /health`
 - **Railway metrics:** CPU, memory, and request logs in the dashboard
-- **Database:** Located at `livedata.db` in the container (ephemeral - consider adding persistent volume)
+- **Database:** Uses `livedata.db`. When `RAILWAY_VOLUME_MOUNT_PATH` is set (volume attached), the DB is stored there and persists across redeploys. Without a volume, data is lost on restart.
 
-### Database Backup (Important!)
+### Database persistence (required)
 
-Railway's filesystem is ephemeral. For production:
-
-1. Add a persistent volume in Railway settings
-2. Or migrate to PostgreSQL/MySQL for better reliability
-3. Set up automated backups
+The backend automatically uses Railway's volume when one is attached. Add a volume and set its mount path (e.g. `/data`); Railway provides `RAILWAY_VOLUME_MOUNT_PATH` at runtime. See step 4 in Deployment Steps above.
 
 ### Rate Limiting (TODO)
 
