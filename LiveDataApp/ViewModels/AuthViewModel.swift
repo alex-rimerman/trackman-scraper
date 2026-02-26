@@ -3,12 +3,18 @@ import SwiftUI
 
 @MainActor
 class AuthViewModel: ObservableObject {
-    
+
+    private var sessionObserver: NSObjectProtocol?
+
     @Published var isLoggedIn: Bool = AuthService.isLoggedIn
+    @Published var isSubscribed: Bool = AuthService.isSubscribed
     @Published var userName: String = AuthService.currentUserName ?? ""
     @Published var userEmail: String = AuthService.currentUserEmail ?? ""
     @Published var accountType: String = AuthService.accountType ?? "personal"
     
+    /// When set after signup, SubscriptionRequiredView auto-starts purchase for this plan.
+    @Published var pendingSignupPlan: String? = nil  // "personal" | "team"
+
     // Login / Signup form state
     @Published var email: String = ""
     @Published var password: String = ""
@@ -30,7 +36,9 @@ class AuthViewModel: ObservableObject {
             userName = response.name
             userEmail = response.email
             accountType = response.resolvedAccountType
+            isSubscribed = response.resolvedIsSubscribed
             isLoggedIn = true
+            SubscriptionService.logIn(userId: response.userId)
             clearForm()
         } catch {
             errorMessage = error.localizedDescription
@@ -56,7 +64,10 @@ class AuthViewModel: ObservableObject {
             userName = response.name
             userEmail = response.email
             accountType = response.resolvedAccountType
+            isSubscribed = response.resolvedIsSubscribed
             isLoggedIn = true
+            pendingSignupPlan = accountType  // Auto-charge on subscription screen
+            SubscriptionService.logIn(userId: response.userId)
             clearForm()
         } catch {
             errorMessage = error.localizedDescription
@@ -65,9 +76,56 @@ class AuthViewModel: ObservableObject {
         isLoading = false
     }
     
+    /// Refresh subscription status from backend (e.g. after purchase or on launch).
+    func refreshSubscriptionStatus() async {
+        guard AuthService.isLoggedIn else { return }
+        do {
+            let me = try await AuthService.getMe()
+            isSubscribed = me.isSubscribed
+        } catch {
+            // Keep current state on error
+        }
+    }
+    
+    func clearPendingSignupPlan() {
+        pendingSignupPlan = nil
+    }
+
+    /// Permanently delete the user's account. On success, logs out and clears state.
+    func deleteAccount() async throws {
+        try await AuthService.deleteAccount()
+        applySessionInvalidated()
+    }
+
+    init() {
+        sessionObserver = NotificationCenter.default.addObserver(
+            forName: AuthService.sessionInvalidatedNotification,
+            object: nil,
+            queue: .main
+        ) { [weak self] _ in
+            Task { @MainActor in
+                self?.applySessionInvalidated()
+            }
+        }
+    }
+
+    deinit {
+        if let o = sessionObserver {
+            NotificationCenter.default.removeObserver(o)
+        }
+    }
+
     func logout() {
+        pendingSignupPlan = nil
+        SubscriptionService.logOut()
         AuthService.logout()
+        applySessionInvalidated()
+    }
+
+    /// Apply UI state when session is invalidated (from explicit logout or 401).
+    private func applySessionInvalidated() {
         isLoggedIn = false
+        isSubscribed = false
         userName = ""
         userEmail = ""
         clearForm()

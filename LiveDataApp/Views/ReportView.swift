@@ -15,6 +15,8 @@ struct ReportView: View {
     @State private var showShareSheet = false
     @State private var shareImage: UIImage?
     @State private var showProfilesSheet = false
+    @State private var showDeleteAccountConfirmation = false
+    @State private var deleteAccountError: String?
     
     var body: some View {
         ZStack {
@@ -49,6 +51,30 @@ struct ReportView: View {
         }
         .sheet(isPresented: $showProfilesSheet) {
             ProfilesView(authViewModel: authViewModel)
+        }
+        .confirmationDialog("Delete Account", isPresented: $showDeleteAccountConfirmation, titleVisibility: .visible) {
+            Button("Delete", role: .destructive) {
+                Task {
+                    do {
+                        try await authViewModel.deleteAccount()
+                    } catch {
+                        deleteAccountError = error.localizedDescription
+                    }
+                }
+            }
+            Button("Cancel", role: .cancel) { }
+        } message: {
+            Text("This will permanently delete your account and all pitch data. This action cannot be undone.")
+        }
+        .alert("Unable to Delete Account", isPresented: Binding(
+            get: { deleteAccountError != nil },
+            set: { if !$0 { deleteAccountError = nil } }
+        )) {
+            Button("OK") { deleteAccountError = nil }
+        } message: {
+            if let err = deleteAccountError {
+                Text(err)
+            }
         }
     }
     
@@ -109,6 +135,11 @@ struct ReportView: View {
                         }
                     }
                     Divider()
+                    Button(role: .destructive) {
+                        showDeleteAccountConfirmation = true
+                    } label: {
+                        Label("Delete Account", systemImage: "trash")
+                    }
                     Button(role: .destructive) { authViewModel.logout() } label: {
                         Label("Log Out", systemImage: "rectangle.portrait.and.arrow.right")
                     }

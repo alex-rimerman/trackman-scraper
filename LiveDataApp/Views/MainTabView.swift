@@ -12,17 +12,17 @@ struct MainTabView: View {
     
     var body: some View {
         TabView(selection: $selectedTab) {
-            ContentView(authViewModel: authViewModel)
+            ContentView(authViewModel: authViewModel, onPDFUploadComplete: { ids in
+                pendingReportPitchIds = ids
+                selectedTab = 2
+            })
                 .tabItem {
                     Image(systemName: "camera.fill")
                     Text("Analyzer")
                 }
                 .tag(0)
             
-            HistoryView(authViewModel: authViewModel, onPDFUploadComplete: { ids in
-                pendingReportPitchIds = ids
-                selectedTab = 2
-            })
+            HistoryView(authViewModel: authViewModel)
                 .tabItem {
                     Image(systemName: "clock.arrow.circlepath")
                     Text("History")
@@ -38,7 +38,7 @@ struct MainTabView: View {
         }
         .tint(Color(red: 0.53, green: 0.81, blue: 0.92))
         .preferredColorScheme(.dark)
-        .onAppear {
+        .task {
             if needsProfileSelection {
                 showProfileSelector = true
             }

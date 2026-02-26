@@ -1,12 +1,18 @@
 import SwiftUI
 import PhotosUI
+import UniformTypeIdentifiers
 
 struct CaptureView: View {
     @ObservedObject var viewModel: PitchAnalysisViewModel
+    var onPDFUploadComplete: ((Set<String>) -> Void)?
     
     @State private var showCamera = false
     @State private var showPhotoPicker = false
     @State private var selectedPhotoItem: PhotosPickerItem?
+    @State private var showDocumentPicker = false
+    @State private var isImportingPDF = false
+    @State private var importProgressMessage: String?
+    @State private var importErrorMessage: String?
     
     var body: some View {
         ScrollView {
@@ -77,6 +83,30 @@ struct CaptureView: View {
                         )
                     }
                     
+                    Button(action: { showDocumentPicker = true }) {
+                        HStack(spacing: 12) {
+                            Image(systemName: "doc.badge.plus")
+                                .font(.system(size: 20))
+                            Text("Upload Trackman PDF")
+                                .font(.system(size: 17, weight: .semibold))
+                        }
+                        .foregroundColor(.white)
+                        .frame(maxWidth: .infinity)
+                        .padding(.vertical, 16)
+                        .background(
+                            LinearGradient(
+                                colors: [
+                                    Color(red: 0.53, green: 0.81, blue: 0.92),
+                                    Color(red: 0.39, green: 0.68, blue: 0.82)
+                                ],
+                                startPoint: .leading,
+                                endPoint: .trailing
+                            )
+                        )
+                        .cornerRadius(14)
+                        .shadow(color: Color(red: 0.53, green: 0.81, blue: 0.92).opacity(0.4), radius: 8, y: 4)
+                    }
+                    
                     Button(action: {
                         viewModel.pitchData = PitchData()
                         viewModel.goToStep(.review)
@@ -108,6 +138,21 @@ struct CaptureView: View {
                     .padding(.top, 16)
                 }
                 
+                if let error = importErrorMessage {
+                    HStack {
+                        Image(systemName: "exclamationmark.triangle.fill")
+                            .foregroundColor(.orange)
+                        Text(error)
+                            .font(.caption)
+                            .foregroundColor(.white.opacity(0.8))
+                    }
+                    .padding()
+                    .background(Color.orange.opacity(0.15))
+                    .cornerRadius(10)
+                    .padding(.horizontal, 24)
+                    .onTapGesture { importErrorMessage = nil }
+                }
+                
                 if let error = viewModel.errorMessage {
                     HStack {
                         Image(systemName: "exclamationmark.triangle.fill")
@@ -123,6 +168,27 @@ struct CaptureView: View {
                 }
                 
                 Spacer().frame(height: 40)
+            }
+        }
+        .fileImporter(
+            isPresented: $showDocumentPicker,
+            allowedContentTypes: [.pdf],
+            allowsMultipleSelection: false
+        ) { result in
+            handlePDFImport(result: result)
+        }
+        .overlay {
+            if isImportingPDF {
+                Color.black.opacity(0.5)
+                    .ignoresSafeArea()
+                VStack(spacing: 16) {
+                    ProgressView()
+                        .progressViewStyle(CircularProgressViewStyle(tint: .white))
+                        .scaleEffect(1.5)
+                    Text(importProgressMessage ?? "Importing...")
+                        .font(.subheadline)
+                        .foregroundColor(.white)
+                }
             }
         }
         .fullScreenCover(isPresented: $showCamera) {
@@ -144,6 +210,35 @@ struct CaptureView: View {
                         await viewModel.processImage(image)
                     }
                 }
+            }
+        }
+    }
+    
+    private func handlePDFImport(result: Result<[URL], Error>) {
+        Task {
+            isImportingPDF = true
+            importProgressMessage = "Opening PDF..."
+            importErrorMessage = nil
+            defer {
+                isImportingPDF = false
+                importProgressMessage = nil
+            }
+            
+            do {
+                guard case .success(let urls) = result, let url = urls.first else {
+                    return
+                }
+                guard url.startAccessingSecurityScopedResource() else {
+                    importErrorMessage = "Could not access the selected file"
+                    return
+                }
+                defer { url.stopAccessingSecurityScopedResource() }
+                
+                importProgressMessage = "Importing Trackman report..."
+                let savedIds = try await TrackmanPDFImporter.importFrom(url: url)
+                onPDFUploadComplete?(savedIds)
+            } catch {
+                importErrorMessage = error.localizedDescription
             }
         }
     }

@@ -2,8 +2,12 @@ import SwiftUI
 
 struct ContentView: View {
     @ObservedObject var authViewModel: AuthViewModel
+    var onPDFUploadComplete: ((Set<String>) -> Void)?
     @StateObject private var viewModel = PitchAnalysisViewModel()
     @State private var showProfilesSheet = false
+    @State private var showDeleteAccountConfirmation = false
+    @State private var isDeletingAccount = false
+    @State private var deleteAccountError: String?
     
     var body: some View {
         NavigationStack {
@@ -48,7 +52,7 @@ struct ContentView: View {
                     
                     // Main content
                     TabView(selection: $viewModel.currentStep) {
-                        CaptureView(viewModel: viewModel)
+                        CaptureView(viewModel: viewModel, onPDFUploadComplete: onPDFUploadComplete)
                             .tag(PitchAnalysisViewModel.AnalysisStep.capture)
                         
                         ReviewDataView(viewModel: viewModel)
@@ -64,6 +68,33 @@ struct ContentView: View {
             .navigationBarHidden(true)
             .sheet(isPresented: $showProfilesSheet) {
                 ProfilesView(authViewModel: authViewModel)
+            }
+            .confirmationDialog("Delete Account", isPresented: $showDeleteAccountConfirmation, titleVisibility: .visible) {
+                Button("Delete", role: .destructive) {
+                    Task {
+                        isDeletingAccount = true
+                        deleteAccountError = nil
+                        do {
+                            try await authViewModel.deleteAccount()
+                        } catch {
+                            deleteAccountError = error.localizedDescription
+                        }
+                        isDeletingAccount = false
+                    }
+                }
+                Button("Cancel", role: .cancel) { }
+            } message: {
+                Text("This will permanently delete your account and all pitch data. This action cannot be undone.")
+            }
+            .alert("Unable to Delete Account", isPresented: Binding(
+                get: { deleteAccountError != nil },
+                set: { if !$0 { deleteAccountError = nil } }
+            )) {
+                Button("OK") { deleteAccountError = nil }
+            } message: {
+                if let err = deleteAccountError {
+                    Text(err)
+                }
             }
         }
     }
@@ -108,6 +139,11 @@ struct ContentView: View {
                         }
                     }
                     Divider()
+                    Button(role: .destructive) {
+                        showDeleteAccountConfirmation = true
+                    } label: {
+                        Label("Delete Account", systemImage: "trash")
+                    }
                     Button(role: .destructive) {
                         authViewModel.logout()
                     } label: {

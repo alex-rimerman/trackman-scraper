@@ -28,7 +28,9 @@ struct AuthResponse: Codable {
     let name: String
     let accountType: String?
     let defaultProfileId: String?
-    
+    let isSubscribed: Bool?
+    let subscriptionExpiresAt: String?
+
     enum CodingKeys: String, CodingKey {
         case token
         case userId = "user_id"
@@ -36,9 +38,34 @@ struct AuthResponse: Codable {
         case name
         case accountType = "account_type"
         case defaultProfileId = "default_profile_id"
+        case isSubscribed = "is_subscribed"
+        case subscriptionExpiresAt = "subscription_expires_at"
     }
-    
+
     var resolvedAccountType: String { accountType ?? "personal" }
+    var resolvedIsSubscribed: Bool { isSubscribed ?? false }
+}
+
+// MARK: - Auth Me (GET /auth/me) – subscription status
+
+struct AuthMeResponse: Codable {
+    let userId: String
+    let email: String
+    let name: String
+    let accountType: String?
+    let defaultProfileId: String?
+    let isSubscribed: Bool
+    let subscriptionExpiresAt: String?
+
+    enum CodingKeys: String, CodingKey {
+        case userId = "user_id"
+        case email
+        case name
+        case accountType = "account_type"
+        case defaultProfileId = "default_profile_id"
+        case isSubscribed = "is_subscribed"
+        case subscriptionExpiresAt = "subscription_expires_at"
+    }
 }
 
 // MARK: - Profile

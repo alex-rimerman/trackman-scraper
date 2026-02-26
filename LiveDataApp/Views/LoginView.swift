@@ -37,7 +37,10 @@ struct LoginView: View {
                     
                     // Toggle Login / Signup
                     HStack(spacing: 0) {
-                        Button(action: { withAnimation { authViewModel.isSignup = false } }) {
+                        Button(action: {
+                            authViewModel.errorMessage = nil
+                            withAnimation { authViewModel.isSignup = false }
+                        }) {
                             Text("Log In")
                                 .font(.system(size: 16, weight: .semibold))
                                 .foregroundColor(!authViewModel.isSignup ? .white : .white.opacity(0.4))
@@ -45,9 +48,14 @@ struct LoginView: View {
                                 .padding(.vertical, 12)
                                 .background(!authViewModel.isSignup ? Color.white.opacity(0.15) : Color.clear)
                                 .cornerRadius(10)
+                                .contentShape(Rectangle())
                         }
+                        .buttonStyle(.plain)
                         
-                        Button(action: { withAnimation { authViewModel.isSignup = true } }) {
+                        Button(action: {
+                            authViewModel.errorMessage = nil
+                            withAnimation { authViewModel.isSignup = true }
+                        }) {
                             Text("Sign Up")
                                 .font(.system(size: 16, weight: .semibold))
                                 .foregroundColor(authViewModel.isSignup ? .white : .white.opacity(0.4))
@@ -55,7 +63,9 @@ struct LoginView: View {
                                 .padding(.vertical, 12)
                                 .background(authViewModel.isSignup ? Color.white.opacity(0.15) : Color.clear)
                                 .cornerRadius(10)
+                                .contentShape(Rectangle())
                         }
+                        .buttonStyle(.plain)
                     }
                     .padding(4)
                     .background(Color.white.opacity(0.05))
@@ -91,7 +101,9 @@ struct LoginView: View {
                                         .padding(.vertical, 12)
                                         .background(authViewModel.accountType == "personal" ? Color.white.opacity(0.15) : Color.clear)
                                         .cornerRadius(10)
+                                        .contentShape(Rectangle())
                                     }
+                                    .buttonStyle(.plain)
                                     
                                     Button(action: { authViewModel.accountType = "team" }) {
                                         HStack(spacing: 6) {
@@ -104,7 +116,9 @@ struct LoginView: View {
                                         .padding(.vertical, 12)
                                         .background(authViewModel.accountType == "team" ? Color.white.opacity(0.15) : Color.clear)
                                         .cornerRadius(10)
+                                        .contentShape(Rectangle())
                                     }
+                                    .buttonStyle(.plain)
                                 }
                                 .padding(4)
                                 .background(Color.white.opacity(0.05))
@@ -146,15 +160,15 @@ struct LoginView: View {
                     .padding(.horizontal, 32)
                     
                     // Submit button
-                    Button(action: {
-                        Task {
+                    Button {
+                        Task { @MainActor in
                             if authViewModel.isSignup {
                                 await authViewModel.signup()
                             } else {
                                 await authViewModel.login()
                             }
                         }
-                    }) {
+                    } label: {
                         HStack {
                             if authViewModel.isLoading {
                                 ProgressView()
@@ -167,6 +181,7 @@ struct LoginView: View {
                         .foregroundColor(.white)
                         .frame(maxWidth: .infinity)
                         .padding(.vertical, 16)
+                        .contentShape(Rectangle())
                         .background(
                             LinearGradient(
                                 colors: [
@@ -179,12 +194,14 @@ struct LoginView: View {
                         )
                         .cornerRadius(14)
                     }
+                    .buttonStyle(.plain)
                     .disabled(authViewModel.isLoading)
                     .padding(.horizontal, 32)
                     
                     Spacer()
                 }
             }
+            .scrollDismissesKeyboard(.interactively)
         }
         .preferredColorScheme(.dark)
     }

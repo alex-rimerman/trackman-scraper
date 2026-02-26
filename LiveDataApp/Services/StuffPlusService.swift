@@ -193,6 +193,9 @@ class StuffPlusService {
         urlRequest.httpMethod = "POST"
         urlRequest.setValue("application/json", forHTTPHeaderField: "Content-Type")
         urlRequest.timeoutInterval = 15
+        if let token = AuthService.token {
+            urlRequest.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+        }
         
         let encoder = JSONEncoder()
         urlRequest.httpBody = try encoder.encode(body)
@@ -206,6 +209,9 @@ class StuffPlusService {
         if httpResponse.statusCode == 200 {
             let decoder = JSONDecoder()
             return try decoder.decode(R.self, from: data)
+        } else if httpResponse.statusCode == 401 {
+            AuthService.logout()
+            throw StuffPlusError.serverError("Session expired. Please log in again.")
         } else {
             if let errorResp = try? JSONDecoder().decode(ErrorResponse.self, from: data) {
                 throw StuffPlusError.serverError(errorResp.detail)

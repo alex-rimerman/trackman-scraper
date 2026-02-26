@@ -15,6 +15,8 @@ class AuthService {
     private static let defaultProfileIdKey = "auth_default_profile_id"
     private static let currentProfileIdKey = "auth_current_profile_id"
     private static let currentProfileNameKey = "auth_current_profile_name"
+    private static let isSubscribedKey = "auth_is_subscribed"
+    private static let subscriptionExpiresAtKey = "auth_subscription_expires_at"
     
     static var token: String? {
         get { UserDefaults.standard.string(forKey: tokenKey) }
@@ -57,9 +59,22 @@ class AuthService {
         get { UserDefaults.standard.string(forKey: currentProfileNameKey) }
         set { UserDefaults.standard.set(newValue, forKey: currentProfileNameKey) }
     }
-    
+
+    static var isSubscribed: Bool {
+        get { UserDefaults.standard.bool(forKey: isSubscribedKey) }
+        set { UserDefaults.standard.set(newValue, forKey: isSubscribedKey) }
+    }
+
+    static var subscriptionExpiresAt: String? {
+        get { UserDefaults.standard.string(forKey: subscriptionExpiresAtKey) }
+        set { UserDefaults.standard.set(newValue, forKey: subscriptionExpiresAtKey) }
+    }
+
     static var isLoggedIn: Bool { token != nil }
     
+    /// Notification posted when session is invalidated (401 or explicit logout). AuthViewModel observes this.
+    static let sessionInvalidatedNotification = Notification.Name("AuthServiceSessionInvalidated")
+
     static func logout() {
         token = nil
         currentUserId = nil
@@ -69,6 +84,9 @@ class AuthService {
         defaultProfileId = nil
         currentProfileId = nil
         currentProfileName = nil
+        isSubscribed = false
+        subscriptionExpiresAt = nil
+        NotificationCenter.default.post(name: sessionInvalidatedNotification, object: nil)
     }
     
     // MARK: - Auth Endpoints
@@ -86,7 +104,15 @@ class AuthService {
         saveAuth(response)
         return response
     }
-    
+
+    /// Fetch current user and subscription status from backend (e.g. after purchase or on launch).
+    static func getMe() async throws -> AuthMeResponse {
+        let response: AuthMeResponse = try await get(endpoint: "/auth/me", authenticated: true)
+        isSubscribed = response.isSubscribed
+        subscriptionExpiresAt = response.subscriptionExpiresAt
+        return response
+    }
+
     private static func saveAuth(_ response: AuthResponse) {
         token = response.token
         currentUserId = response.userId
@@ -95,6 +121,8 @@ class AuthService {
         accountType = response.resolvedAccountType
         defaultProfileId = response.defaultProfileId
         currentProfileId = response.defaultProfileId
+        isSubscribed = response.resolvedIsSubscribed
+        subscriptionExpiresAt = response.subscriptionExpiresAt
         // For personal accounts, profile name is the user's name
         if response.resolvedAccountType == "personal" {
             currentProfileName = response.name
@@ -133,6 +161,36 @@ class AuthService {
         return try await get(endpoint: endpoint, authenticated: true)
     }
     
+    /// Permanently delete the user's account and all associated data.
+    static func deleteAccount() async throws {
+        guard let url = URL(string: "\(baseURL)/auth/account") else {
+            throw AuthError.invalidURL
+        }
+        var request = URLRequest(url: url)
+        request.httpMethod = "DELETE"
+        request.timeoutInterval = 15
+
+        if let tok = token {
+            request.setValue("Bearer \(tok)", forHTTPHeaderField: "Authorization")
+        }
+
+        let (data, response) = try await URLSession.shared.data(for: request)
+        guard let http = response as? HTTPURLResponse else {
+            throw AuthError.networkError("Invalid response")
+        }
+        if http.statusCode == 401 {
+            logout()
+            throw AuthError.unauthorized
+        }
+        guard (200...299).contains(http.statusCode) else {
+            if let err = try? JSONDecoder().decode(ErrorResponse.self, from: data) {
+                throw AuthError.serverError(err.detail)
+            }
+            throw AuthError.serverError("Account deletion failed (status \(http.statusCode))")
+        }
+        logout()
+    }
+
     static func deletePitch(id: String) async throws {
         guard let url = URL(string: "\(baseURL)/pitches/\(id)") else {
             throw AuthError.invalidURL

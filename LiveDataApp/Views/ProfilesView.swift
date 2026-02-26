@@ -10,6 +10,8 @@ struct ProfilesView: View {
     @State private var showCreateProfile = false
     @State private var newProfileName = ""
     @State private var isCreating = false
+    @State private var showDeleteAccountConfirmation = false
+    @State private var deleteAccountError: String?
     
     private var hasValidSelection: Bool {
         guard let currentId = AuthService.currentProfileId else { return false }
@@ -54,7 +56,9 @@ struct ProfilesView: View {
                                     .foregroundColor(.white.opacity(0.6))
                                     .multilineTextAlignment(.center)
                                     .padding(.horizontal, 32)
-                                Button(action: { showCreateProfile = true }) {
+                                Button {
+                                    showCreateProfile = true
+                                } label: {
                                     HStack {
                                         Image(systemName: "plus.circle.fill")
                                         Text("Create Profile")
@@ -63,10 +67,22 @@ struct ProfilesView: View {
                                     .foregroundColor(.white)
                                     .padding(.vertical, 14)
                                     .padding(.horizontal, 24)
+                                    .contentShape(Rectangle())
                                     .background(Color(red: 0.53, green: 0.81, blue: 0.92))
                                     .cornerRadius(12)
                                 }
+                                .buttonStyle(.plain)
                                 .padding(.top, 8)
+                                Button {
+                                    authViewModel.logout()
+                                } label: {
+                                    Text("Sign Out")
+                                        .font(.subheadline)
+                                        .foregroundColor(.white.opacity(0.6))
+                                        .contentShape(Rectangle())
+                                }
+                                .buttonStyle(.plain)
+                                .padding(.top, 20)
                                 Spacer()
                             }
                         } else {
@@ -121,19 +137,34 @@ struct ProfilesView: View {
                     ToolbarItem(placement: .cancellationAction) {
                         Button("Done") { dismiss() }
                             .foregroundColor(Color(red: 0.53, green: 0.81, blue: 0.92))
+                            .buttonStyle(.plain)
                     }
                 } else {
                     ToolbarItem(placement: .cancellationAction) {
                         Button("Done") { dismiss() }
                             .foregroundColor(hasValidSelection ? Color(red: 0.53, green: 0.81, blue: 0.92) : .gray)
                             .disabled(!hasValidSelection)
+                            .buttonStyle(.plain)
                     }
                 }
                 ToolbarItem(placement: .primaryAction) {
-                    Button(action: { showCreateProfile = true }) {
+                    Button {
+                        showCreateProfile = true
+                    } label: {
                         Image(systemName: "plus.circle.fill")
                             .foregroundColor(Color(red: 0.53, green: 0.81, blue: 0.92))
                     }
+                    .buttonStyle(.plain)
+                }
+                ToolbarItem(placement: .secondaryAction) {
+                    Menu {
+                        Button("Sign Out", role: .destructive) { authViewModel.logout() }
+                        Button("Delete Account", role: .destructive) { showDeleteAccountConfirmation = true }
+                    } label: {
+                        Image(systemName: "ellipsis.circle")
+                            .foregroundColor(.white.opacity(0.7))
+                    }
+                    .buttonStyle(.plain)
                 }
             }
             .sheet(isPresented: $showCreateProfile) {
@@ -145,6 +176,30 @@ struct ProfilesView: View {
                     },
                     onDismiss: { showCreateProfile = false }
                 )
+            }
+            .confirmationDialog("Delete Account", isPresented: $showDeleteAccountConfirmation, titleVisibility: .visible) {
+                Button("Delete", role: .destructive) {
+                    Task {
+                        do {
+                            try await authViewModel.deleteAccount()
+                        } catch {
+                            deleteAccountError = error.localizedDescription
+                        }
+                    }
+                }
+                Button("Cancel", role: .cancel) { }
+            } message: {
+                Text("This will permanently delete your account and all pitch data. This action cannot be undone.")
+            }
+            .alert("Unable to Delete Account", isPresented: Binding(
+                get: { deleteAccountError != nil },
+                set: { if !$0 { deleteAccountError = nil } }
+            )) {
+                Button("OK") { deleteAccountError = nil }
+            } message: {
+                if let err = deleteAccountError {
+                    Text(err)
+                }
             }
         }
         .task { await loadProfiles() }
@@ -234,6 +289,7 @@ struct CreateProfileSheet: View {
                 ToolbarItem(placement: .cancellationAction) {
                     Button("Cancel") { onDismiss() }
                         .foregroundColor(.white.opacity(0.7))
+                        .buttonStyle(.plain)
                 }
                 ToolbarItem(placement: .confirmationAction) {
                     Button("Create") {
@@ -242,6 +298,7 @@ struct CreateProfileSheet: View {
                     .fontWeight(.semibold)
                     .foregroundColor(profileName.trimmingCharacters(in: .whitespaces).isEmpty ? .gray : Color(red: 0.53, green: 0.81, blue: 0.92))
                     .disabled(profileName.trimmingCharacters(in: .whitespaces).isEmpty || isCreating)
+                    .buttonStyle(.plain)
                 }
             }
         }

@@ -47,6 +47,9 @@ if JWT_SECRET == "dev-secret-change-in-production-abc123":
     )
 JWT_ALGORITHM = "HS256"
 JWT_EXPIRE_DAYS = 90
+REVENUECAT_WEBHOOK_SECRET = os.environ.get("REVENUECAT_WEBHOOK_SECRET", "")
+# When false/0, subscription gate is disabled; users can use the app without subscribing.
+SUBSCRIPTION_REQUIRED = os.environ.get("SUBSCRIPTION_REQUIRED", "0").lower() in ("1", "true", "yes")
 
 # CORS allowed origins
 ALLOWED_ORIGINS = os.environ.get("CORS_ORIGINS", "*").split(",")
@@ -62,10 +65,14 @@ def hash_password(password: str) -> str:
 def verify_password(password: str, hashed: str) -> bool:
     return bcrypt.checkpw(password.encode("utf-8"), hashed.encode("utf-8"))
 
-# Use Railway volume for persistence when deployed (survives redeploys)
-_db_dir = os.environ.get("RAILWAY_VOLUME_MOUNT_PATH")
-if _db_dir:
-    DB_PATH = os.path.join(_db_dir, "livedata.db")
+# Database path: use explicit DATABASE_PATH if set, else Railway volume, else local
+# For Railway: set DATABASE_PATH=/data/livedata.db and mount volume at /data
+_db_explicit = os.environ.get("DATABASE_PATH")
+_db_vol = os.environ.get("RAILWAY_VOLUME_MOUNT_PATH")
+if _db_explicit:
+    DB_PATH = _db_explicit
+elif _db_vol:
+    DB_PATH = os.path.join(_db_vol, "livedata.db")
 else:
     DB_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "livedata.db")
 
@@ -100,7 +107,11 @@ def init_db():
                 name TEXT NOT NULL,
                 password_hash TEXT NOT NULL,
                 account_type TEXT NOT NULL DEFAULT 'personal',
-                created_at TEXT NOT NULL
+                created_at TEXT NOT NULL,
+                subscription_status TEXT DEFAULT 'none',
+                subscription_plan TEXT,
+                subscription_expires_at TEXT,
+                revenuecat_app_user_id TEXT
             )
         """)
         conn.execute("""
@@ -160,6 +171,18 @@ def migrate_db():
         except sqlite3.OperationalError:
             pass
 
+        for col, default in [
+            ("subscription_status", "'none'"),
+            ("subscription_plan", "NULL"),
+            ("subscription_expires_at", "NULL"),
+            ("revenuecat_app_user_id", "NULL"),
+        ]:
+            try:
+                conn.execute(f"ALTER TABLE users ADD COLUMN {col} TEXT DEFAULT {default}")
+                conn.commit()
+            except sqlite3.OperationalError:
+                pass
+
         # Migrate: for users with no profile, create one and assign pitches (existing users → personal)
         users = conn.execute("SELECT id, name FROM users").fetchall()
         for user in users:
@@ -216,6 +239,40 @@ def verify_token(credentials: HTTPAuthorizationCredentials = Depends(security)) 
         return payload
     except JWTError:
         raise HTTPException(status_code=401, detail="Invalid or expired token")
+
+
+def require_subscription(payload: dict = Depends(verify_token)):
+    """Dependency: user must be authenticated and have an active subscription (unless SUBSCRIPTION_REQUIRED=0)."""
+    if not SUBSCRIPTION_REQUIRED:
+        return payload
+    user_id = payload["sub"]
+    with get_db() as conn:
+        row = conn.execute(
+            """SELECT subscription_status, subscription_expires_at FROM users WHERE id = ?""",
+            (user_id,),
+        ).fetchone()
+    if not row:
+        raise HTTPException(status_code=404, detail="User not found")
+    status = (row["subscription_status"] or "none").lower()
+    expires_at = row["subscription_expires_at"]
+    if status != "active":
+        raise HTTPException(
+            status_code=403,
+            detail="Active subscription required",
+        )
+    if expires_at:
+        try:
+            exp = datetime.fromisoformat(expires_at.replace("Z", "+00:00"))
+            if exp.tzinfo is None:
+                exp = exp.replace(tzinfo=timezone.utc)
+            if exp <= datetime.now(timezone.utc):
+                raise HTTPException(
+                    status_code=403,
+                    detail="Subscription expired",
+                )
+        except (ValueError, TypeError):
+            pass
+    return payload
 
 
 # ---------------------------------------------------------------------------
@@ -296,6 +353,8 @@ class AuthResponse(BaseModel):
     name: str
     account_type: str = "personal"
     default_profile_id: Optional[str] = None  # For personal: the single profile id
+    is_subscribed: bool = False
+    subscription_expires_at: Optional[str] = None  # ISO datetime
 
 class ProfileResponse(BaseModel):
     id: str
@@ -380,7 +439,18 @@ class SavedPitchResponse(BaseModel):
 
 @app.on_event("startup")
 async def startup_event():
+    db_dir = os.path.dirname(DB_PATH)
+    if db_dir and not os.path.exists(db_dir):
+        os.makedirs(db_dir, exist_ok=True)
+    print(f"Database: {DB_PATH}")
     init_db()
+    if os.environ.get("DEPLOY_WIPE_USERS") == "1":
+        with get_db() as conn:
+            conn.execute("DELETE FROM pitches")
+            conn.execute("DELETE FROM profiles")
+            conn.execute("DELETE FROM users")
+            conn.commit()
+        print("WARNING: DEPLOY_WIPE_USERS=1 - cleared all users, profiles, and pitches")
     load_stuff_plus_model()
 
 
@@ -394,8 +464,68 @@ async def health_check():
 
 
 # ---------------------------------------------------------------------------
-# Auth endpoints
+# RevenueCat Webhook
 # ---------------------------------------------------------------------------
+
+def _plan_from_product_id(product_id: str) -> Optional[str]:
+    if not product_id:
+        return None
+    pid = (product_id or "").strip()
+    if pid == "123" or "personal" in pid.lower():
+        return "personal"
+    if pid in ("124", "125") or "team" in pid.lower():
+        return "team"
+    return None
+
+
+@app.post("/webhooks/revenuecat")
+async def webhook_revenuecat(request: Request):
+    """Handle RevenueCat webhook events: INITIAL_PURCHASE, RENEWAL, CANCELLATION, EXPIRATION."""
+    if REVENUECAT_WEBHOOK_SECRET:
+        auth = request.headers.get("Authorization") or request.headers.get("X-Authorization")
+        if auth != f"Bearer {REVENUECAT_WEBHOOK_SECRET}" and auth != REVENUECAT_WEBHOOK_SECRET:
+            raise HTTPException(status_code=401, detail="Invalid webhook secret")
+    try:
+        body = await request.json()
+    except Exception:
+        raise HTTPException(status_code=400, detail="Invalid JSON")
+    event_type = (body.get("type") or "").upper()
+    app_user_id = body.get("app_user_id")
+    if not app_user_id and event_type == "TRANSFER":
+        transferred_to = body.get("transferred_to") or []
+        if transferred_to:
+            app_user_id = transferred_to[0] if isinstance(transferred_to[0], str) else None
+    if not app_user_id:
+        return {"ok": True}
+    product_id = body.get("product_id") or ""
+    expiration_at_ms = body.get("expiration_at_ms")
+    subscription_expires_at = None
+    if expiration_at_ms is not None:
+        try:
+            dt = datetime.fromtimestamp(int(expiration_at_ms) / 1000.0, tz=timezone.utc)
+            subscription_expires_at = dt.isoformat()
+        except (ValueError, TypeError):
+            pass
+    plan = _plan_from_product_id(product_id)
+    with get_db() as conn:
+        exists = conn.execute("SELECT id FROM users WHERE id = ?", (app_user_id,)).fetchone()
+        if not exists:
+            conn.commit()
+            return {"ok": True}
+        if event_type in ("INITIAL_PURCHASE", "RENEWAL", "UNCANCELLATION", "SUBSCRIPTION_EXTENDED", "TEMPORARY_ENTITLEMENT_GRANT"):
+            conn.execute(
+                """UPDATE users SET subscription_status = 'active', subscription_plan = ?,
+                   subscription_expires_at = ?, revenuecat_app_user_id = ? WHERE id = ?""",
+                (plan or "personal", subscription_expires_at, app_user_id, app_user_id),
+            )
+        elif event_type in ("CANCELLATION", "EXPIRATION"):
+            conn.execute(
+                """UPDATE users SET subscription_status = 'expired', subscription_expires_at = ?
+                   WHERE id = ?""",
+                (subscription_expires_at, app_user_id),
+            )
+        conn.commit()
+    return {"ok": True}
 
 @app.post("/auth/signup", response_model=AuthResponse)
 @limiter.limit("5/hour")
@@ -418,8 +548,8 @@ async def signup(request: Request, req: SignupRequest):
         if existing:
             raise HTTPException(status_code=409, detail="An account with this email already exists")
         conn.execute(
-            "INSERT INTO users (id, email, name, password_hash, account_type, created_at) VALUES (?, ?, ?, ?, ?, ?)",
-            (user_id, req.email.lower(), req.name.strip(), hashed, account_type, now),
+            "INSERT INTO users (id, email, name, password_hash, account_type, created_at, subscription_status) VALUES (?, ?, ?, ?, ?, ?, ?)",
+            (user_id, req.email.lower(), req.name.strip(), hashed, account_type, now, "none"),
         )
         if account_type == "personal":
             profile_id = str(uuid.uuid4())
@@ -434,6 +564,7 @@ async def signup(request: Request, req: SignupRequest):
     return AuthResponse(
         token=token, user_id=user_id, email=req.email.lower(), name=req.name.strip(),
         account_type=account_type, default_profile_id=default_profile_id,
+        is_subscribed=False, subscription_expires_at=None,
     )
 
 
@@ -448,6 +579,25 @@ async def login(request: Request, req: LoginRequest):
 
     if not user or not verify_password(req.password, user["password_hash"]):
         raise HTTPException(status_code=401, detail="Invalid email or password")
+
+    with get_db() as conn:
+        sub = conn.execute(
+            "SELECT subscription_status, subscription_expires_at FROM users WHERE id = ?",
+            (user["id"],),
+        ).fetchone()
+    status = (sub["subscription_status"] or "none").lower() if sub else "none"
+    expires_at = sub["subscription_expires_at"] if sub else None
+    is_subscribed = False
+    if status == "active" and expires_at:
+        try:
+            exp = datetime.fromisoformat(expires_at.replace("Z", "+00:00"))
+            if exp.tzinfo is None:
+                exp = exp.replace(tzinfo=timezone.utc)
+            is_subscribed = exp > datetime.now(timezone.utc)
+        except (ValueError, TypeError):
+            pass
+    elif status == "active":
+        is_subscribed = True
 
     account_type = (user["account_type"] or "personal")
     default_profile_id = None
@@ -473,6 +623,7 @@ async def login(request: Request, req: LoginRequest):
     return AuthResponse(
         token=token, user_id=user["id"], email=user["email"], name=user["name"],
         account_type=account_type, default_profile_id=default_profile_id,
+        is_subscribed=is_subscribed, subscription_expires_at=expires_at,
     )
 
 
@@ -480,7 +631,8 @@ async def login(request: Request, req: LoginRequest):
 async def get_me(payload: dict = Depends(verify_token)):
     with get_db() as conn:
         user = conn.execute(
-            "SELECT id, email, name, account_type, created_at FROM users WHERE id = ?",
+            """SELECT id, email, name, account_type, created_at,
+                      subscription_status, subscription_expires_at FROM users WHERE id = ?""",
             (payload["sub"],),
         ).fetchone()
     if not user:
@@ -488,19 +640,48 @@ async def get_me(payload: dict = Depends(verify_token)):
     account_type = user["account_type"] or "personal"
     default_profile_id = None
     if account_type == "personal":
-        profile = conn.execute(
-            "SELECT id FROM profiles WHERE user_id = ? ORDER BY created_at ASC LIMIT 1",
-            (user["id"],),
-        ).fetchone()
-        if profile:
-            default_profile_id = profile["id"]
+        with get_db() as conn:
+            profile = conn.execute(
+                "SELECT id FROM profiles WHERE user_id = ? ORDER BY created_at ASC LIMIT 1",
+                (user["id"],),
+            ).fetchone()
+            if profile:
+                default_profile_id = profile["id"]
+    status = (user["subscription_status"] or "none").lower()
+    expires_at = user["subscription_expires_at"]
+    is_subscribed = False
+    if status == "active":
+        if not expires_at:
+            is_subscribed = True
+        else:
+            try:
+                exp = datetime.fromisoformat(expires_at.replace("Z", "+00:00"))
+                if exp.tzinfo is None:
+                    exp = exp.replace(tzinfo=timezone.utc)
+                is_subscribed = exp > datetime.now(timezone.utc)
+            except (ValueError, TypeError):
+                pass
     return {
         "user_id": user["id"],
         "email": user["email"],
         "name": user["name"],
         "account_type": account_type,
         "default_profile_id": default_profile_id,
+        "is_subscribed": is_subscribed,
+        "subscription_expires_at": expires_at,
     }
+
+
+@app.delete("/auth/account", status_code=204)
+async def delete_account(payload: dict = Depends(verify_token)):
+    """Permanently delete the user's account and all associated data (profiles, pitches)."""
+    user_id = payload["sub"]
+    with get_db() as conn:
+        conn.execute("DELETE FROM pitches WHERE user_id = ?", (user_id,))
+        conn.execute("DELETE FROM profiles WHERE user_id = ?", (user_id,))
+        conn.execute("DELETE FROM users WHERE id = ?", (user_id,))
+        conn.commit()
+    return None
 
 
 # ---------------------------------------------------------------------------
@@ -508,7 +689,7 @@ async def get_me(payload: dict = Depends(verify_token)):
 # ---------------------------------------------------------------------------
 
 @app.get("/profiles", response_model=list[ProfileResponse])
-async def get_profiles(payload: dict = Depends(verify_token)):
+async def get_profiles(payload: dict = Depends(require_subscription)):
     user_id = payload["sub"]
     with get_db() as conn:
         rows = conn.execute(
@@ -524,7 +705,7 @@ async def get_profiles(payload: dict = Depends(verify_token)):
 @app.post("/profiles", response_model=ProfileResponse, status_code=201)
 async def create_profile(
     req: CreateProfileRequest,
-    payload: dict = Depends(verify_token),
+    payload: dict = Depends(require_subscription),
 ):
     with get_db() as conn:
         profile_id = str(uuid.uuid4())
@@ -546,7 +727,7 @@ async def create_profile(
 
 @app.post("/predict", response_model=PitchResponse)
 @limiter.limit("300/hour")
-async def predict_stuff_plus(request: Request, pitch_request: PitchRequest):
+async def predict_stuff_plus(request: Request, pitch_request: PitchRequest, payload: dict = Depends(require_subscription)):
     if model_college is None:
         raise HTTPException(status_code=503, detail="Stuff+ model not loaded")
     valid_types = {"FF", "SI", "FC", "SL", "CU", "CH", "ST", "FS", "KC"}
@@ -626,7 +807,7 @@ def _run_prediction(
 
 @app.post("/predict/suggest", response_model=SuggestResponse)
 @limiter.limit("100/hour")
-async def suggest_improvement(request: Request, pitch_request: PitchRequest):
+async def suggest_improvement(request: Request, pitch_request: PitchRequest, payload: dict = Depends(require_subscription)):
     """Run variations (+1 mph, ±1" IVB, ±1" HB, ±1 mph, ±100 rpm) and suggest what would most improve Stuff+."""
     if model_college is None:
         raise HTTPException(status_code=503, detail="Stuff+ model not loaded")
@@ -693,7 +874,7 @@ async def suggest_improvement(request: Request, pitch_request: PitchRequest):
 # ---------------------------------------------------------------------------
 
 @app.post("/pitches", response_model=SavedPitchResponse, status_code=201)
-async def save_pitch(req: SavePitchRequest, payload: dict = Depends(verify_token)):
+async def save_pitch(req: SavePitchRequest, payload: dict = Depends(require_subscription)):
     pitch_id = str(uuid.uuid4())
     now = datetime.now(timezone.utc).isoformat()
     user_id = payload["sub"]
@@ -746,7 +927,7 @@ async def save_pitch(req: SavePitchRequest, payload: dict = Depends(verify_token
 
 @app.get("/pitches", response_model=list[SavedPitchResponse])
 async def get_pitches(
-    payload: dict = Depends(verify_token),
+    payload: dict = Depends(require_subscription),
     limit: int = 50,
     offset: int = 0,
     pitch_type: Optional[str] = None,
@@ -795,7 +976,7 @@ async def get_pitches(
 
 
 @app.delete("/pitches/{pitch_id}", status_code=204)
-async def delete_pitch(pitch_id: str, payload: dict = Depends(verify_token)):
+async def delete_pitch(pitch_id: str, payload: dict = Depends(require_subscription)):
     user_id = payload["sub"]
     with get_db() as conn:
         row = conn.execute(

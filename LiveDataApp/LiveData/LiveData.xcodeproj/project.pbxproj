@@ -11,7 +11,6 @@
 		8DABA6F82F36A0500020EB72 /* PitchData.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8DABA6E72F36A0500020EB72 /* PitchData.swift */; };
 		8DABA6F92F36A0500020EB72 /* StuffPlusService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8DABA6E92F36A0500020EB72 /* StuffPlusService.swift */; };
 		8DABA6FA2F36A0500020EB72 /* TrackmanOCR.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8DABA6EA2F36A0500020EB72 /* TrackmanOCR.swift */; };
-		8DABA8102F36A0500020EB72 /* TrackmanPDFParser.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8DABA8112F36A0500020EB72 /* TrackmanPDFParser.swift */; };
 		8DABA6FB2F36A0500020EB72 /* PitchAnalysisViewModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8DABA6EC2F36A0500020EB72 /* PitchAnalysisViewModel.swift */; };
 		8DABA6FC2F36A0500020EB72 /* CaptureView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8DABA6EE2F36A0500020EB72 /* CaptureView.swift */; };
 		8DABA6FD2F36A0500020EB72 /* ContentView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8DABA6EF2F36A0500020EB72 /* ContentView.swift */; };
@@ -27,6 +26,10 @@
 		8DABA7FE2F36A0500020EB72 /* PitchDetailView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8DABA7FF2F36A0500020EB72 /* PitchDetailView.swift */; };
 		8DABA8002F36A0500020EB72 /* ReportView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8DABA8012F36A0500020EB72 /* ReportView.swift */; };
 		8DABA8022F36A0500020EB72 /* ProfilesView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8DABA8032F36A0500020EB72 /* ProfilesView.swift */; };
+		8DABA8102F36A0500020EB72 /* TrackmanPDFParser.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8DABA8112F36A0500020EB72 /* TrackmanPDFParser.swift */; };
+		8DABA8122F36A0500020EB72 /* TrackmanPDFImporter.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8DABA8132F36A0500020EB72 /* TrackmanPDFImporter.swift */; };
+		8DABA8142F36B0000020EB72 /* SubscriptionRequiredView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8DABA8152F36B0000020EB72 /* SubscriptionRequiredView.swift */; };
+		8DABA8162F36B0000020EB72 /* SubscriptionService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8DABA8172F36B0000020EB72 /* SubscriptionService.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -55,7 +58,6 @@
 		8DABA6E72F36A0500020EB72 /* PitchData.swift */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.swift; path = PitchData.swift; sourceTree = "<group>"; };
 		8DABA6E92F36A0500020EB72 /* StuffPlusService.swift */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.swift; path = StuffPlusService.swift; sourceTree = "<group>"; };
 		8DABA6EA2F36A0500020EB72 /* TrackmanOCR.swift */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.swift; path = TrackmanOCR.swift; sourceTree = "<group>"; };
-		8DABA8112F36A0500020EB72 /* TrackmanPDFParser.swift */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.swift; path = TrackmanPDFParser.swift; sourceTree = "<group>"; };
 		8DABA6EC2F36A0500020EB72 /* PitchAnalysisViewModel.swift */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.swift; path = PitchAnalysisViewModel.swift; sourceTree = "<group>"; };
 		8DABA6EE2F36A0500020EB72 /* CaptureView.swift */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.swift; path = CaptureView.swift; sourceTree = "<group>"; };
 		8DABA6EF2F36A0500020EB72 /* ContentView.swift */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.swift; path = ContentView.swift; sourceTree = "<group>"; };
@@ -72,6 +74,11 @@
 		8DABA7FF2F36A0500020EB72 /* PitchDetailView.swift */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.swift; path = PitchDetailView.swift; sourceTree = "<group>"; };
 		8DABA8012F36A0500020EB72 /* ReportView.swift */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.swift; path = ReportView.swift; sourceTree = "<group>"; };
 		8DABA8032F36A0500020EB72 /* ProfilesView.swift */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.swift; path = ProfilesView.swift; sourceTree = "<group>"; };
+		8DABA8112F36A0500020EB72 /* TrackmanPDFParser.swift */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.swift; path = TrackmanPDFParser.swift; sourceTree = "<group>"; };
+		8DABA8132F36A0500020EB72 /* TrackmanPDFImporter.swift */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.swift; path = TrackmanPDFImporter.swift; sourceTree = "<group>"; };
+		8DABA8152F36B0000020EB72 /* SubscriptionRequiredView.swift */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.swift; path = SubscriptionRequiredView.swift; sourceTree = "<group>"; };
+		8DABA8172F36B0000020EB72 /* SubscriptionService.swift */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.swift; path = SubscriptionService.swift; sourceTree = "<group>"; };
+		8DABA8182F36B0000020EB72 /* SubscriptionConfiguration.storekit */ = {isa = PBXFileReference; lastKnownFileType = file; path = SubscriptionConfiguration.storekit; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -148,7 +155,9 @@
 				8DABA6E92F36A0500020EB72 /* StuffPlusService.swift */,
 				8DABA6EA2F36A0500020EB72 /* TrackmanOCR.swift */,
 				8DABA8112F36A0500020EB72 /* TrackmanPDFParser.swift */,
+				8DABA8132F36A0500020EB72 /* TrackmanPDFImporter.swift */,
 				8DABA7022F36A0500020EB72 /* AuthService.swift */,
+				8DABA8172F36B0000020EB72 /* SubscriptionService.swift */,
 			);
 			path = Services;
 			sourceTree = "<group>";
@@ -175,6 +184,7 @@
 				8DABA7062F36A0500020EB72 /* MainTabView.swift */,
 				8DABA8012F36A0500020EB72 /* ReportView.swift */,
 				8DABA8032F36A0500020EB72 /* ProfilesView.swift */,
+				8DABA8152F36B0000020EB72 /* SubscriptionRequiredView.swift */,
 			);
 			path = Views;
 			sourceTree = "<group>";
@@ -190,6 +200,7 @@
 				8DABA6F22F36A0500020EB72 /* Views */,
 				8DABA6F32F36A0500020EB72 /* Info.plist */,
 				8DABA70D2F36A0500020EB72 /* Assets.xcassets */,
+				8DABA8182F36B0000020EB72 /* SubscriptionConfiguration.storekit */,
 			);
 			name = LiveDataApp;
 			path = ..;
@@ -214,8 +225,12 @@
 			buildRules = (
 			);
 			dependencies = (
+				8DABA6AC2F369BF30020EB72 /* PBXTargetDependency */,
 			);
 			name = LiveData;
+			packageProductDependencies = (
+				RCSPM0012F36B1000020EB72 /* RevenueCat */,
+			);
 			productName = LiveData;
 			productReference = 8DABA69A2F369BF20020EB72 /* LiveData.app */;
 			productType = "com.apple.product-type.application";
@@ -288,6 +303,9 @@
 				Base,
 			);
 			mainGroup = 8DABA6912F369BF20020EB72;
+			packageReferences = (
+				RCSPM0002F36B1000020EB72 /* XCRemoteSwiftPackageReference "purchases-ios-spm" */,
+			);
 			productRefGroup = 8DABA69B2F369BF20020EB72 /* Products */;
 			projectDirPath = "";
 			projectReferences = (
@@ -338,6 +356,7 @@
 				8DABA6F82F36A0500020EB72 /* PitchData.swift in Sources */,
 				8DABA6FA2F36A0500020EB72 /* TrackmanOCR.swift in Sources */,
 				8DABA8102F36A0500020EB72 /* TrackmanPDFParser.swift in Sources */,
+				8DABA8122F36A0500020EB72 /* TrackmanPDFImporter.swift in Sources */,
 				8DABA6FD2F36A0500020EB72 /* ContentView.swift in Sources */,
 				8DABA6F72F36A0500020EB72 /* LiveDataApp.swift in Sources */,
 				8DABA6FB2F36A0500020EB72 /* PitchAnalysisViewModel.swift in Sources */,
@@ -354,6 +373,8 @@
 				8DABA70C2F36A0500020EB72 /* MainTabView.swift in Sources */,
 				8DABA8002F36A0500020EB72 /* ReportView.swift in Sources */,
 				8DABA8022F36A0500020EB72 /* ProfilesView.swift in Sources */,
+				8DABA8142F36B0000020EB72 /* SubscriptionRequiredView.swift in Sources */,
+				8DABA8162F36B0000020EB72 /* SubscriptionService.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -385,6 +406,25 @@
 			targetProxy = 8DABA6B52F369BF30020EB72 /* PBXContainerItemProxy */;
 		};
 /* End PBXTargetDependency section */
+
+/* Begin XCRemoteSwiftPackageReference section */
+		RCSPM0002F36B1000020EB72 /* XCRemoteSwiftPackageReference "purchases-ios-spm" */ = {
+			isa = XCRemoteSwiftPackageReference;
+			repositoryURL = "https://github.com/RevenueCat/purchases-ios-spm";
+			requirement = {
+				kind = upToNextMajorVersion;
+				minimumVersion = 5.0.0;
+			};
+		};
+/* End XCRemoteSwiftPackageReference section */
+
+/* Begin XCSwiftPackageProductDependency section */
+		RCSPM0012F36B1000020EB72 /* RevenueCat */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = RCSPM0002F36B1000020EB72 /* XCRemoteSwiftPackageReference "purchases-ios-spm" */;
+			productName = RevenueCat;
+		};
+/* End XCSwiftPackageProductDependency section */
 
 /* Begin XCBuildConfiguration section */
 		8DABA6BC2F369BF30020EB72 /* Debug */ = {
@@ -512,7 +552,7 @@
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 7;
+				CURRENT_PROJECT_VERSION = 8;
 				DEVELOPMENT_ASSET_PATHS = "";
 				DEVELOPMENT_TEAM = FBG4AT9NN6;
 				ENABLE_PREVIEWS = YES;
@@ -542,7 +582,7 @@
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 7;
+				CURRENT_PROJECT_VERSION = 8;
 				DEVELOPMENT_ASSET_PATHS = "";
 				DEVELOPMENT_TEAM = FBG4AT9NN6;
 				ENABLE_PREVIEWS = YES;

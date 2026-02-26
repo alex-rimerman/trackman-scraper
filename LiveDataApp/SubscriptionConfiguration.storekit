@@ -1,0 +1,77 @@
+{
+  "identifier" : "LiveDataSubscriptions",
+  "nonRenewingSubscriptions" : [
+
+  ],
+  "products" : [
+
+  ],
+  "settings" : {
+
+  },
+  "subscriptionGroups" : [
+    {
+      "id" : "personal_monthly",
+      "localizations" : [
+
+      ],
+      "name" : "LiveData Subscriptions",
+      "subscriptions" : [
+        {
+          "adHocOffers" : [
+
+          ],
+          "codeOffers" : [
+
+          ],
+          "displayPrice" : "4.99",
+          "familyShareable" : false,
+          "groupNumber" : 1,
+          "internalID" : "123",
+          "introductoryOffer" : null,
+          "localizations" : [
+            {
+              "description" : "Personal monthly subscription",
+              "displayName" : "Personal",
+              "locale" : "en_US"
+            }
+          ],
+          "productID" : "123",
+          "recurringSubscriptionPeriod" : "P1M",
+          "referenceName" : "Personal Monthly",
+          "subscriptionGroupID" : "personal_monthly",
+          "type" : "RecurringSubscription"
+        },
+        {
+          "adHocOffers" : [
+
+          ],
+          "codeOffers" : [
+
+          ],
+          "displayPrice" : "29.99",
+          "familyShareable" : false,
+          "groupNumber" : 2,
+          "internalID" : "125",
+          "introductoryOffer" : null,
+          "localizations" : [
+            {
+              "description" : "Team monthly subscription",
+              "displayName" : "Team",
+              "locale" : "en_US"
+            }
+          ],
+          "productID" : "125",
+          "recurringSubscriptionPeriod" : "P1M",
+          "referenceName" : "Team Monthly",
+          "subscriptionGroupID" : "personal_monthly",
+          "type" : "RecurringSubscription"
+        }
+      ]
+    }
+  ],
+  "version" : {
+    "major" : 2,
+    "minor" : 0
+  }
+}
