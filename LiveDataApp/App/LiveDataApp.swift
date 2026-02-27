@@ -5,7 +5,10 @@ struct LiveDataApp: App {
     @StateObject private var authViewModel = AuthViewModel()
 
     init() {
-        SubscriptionService.configure()
+        // Defer RevenueCat setup to avoid potential launch crashes
+        DispatchQueue.main.async {
+            SubscriptionService.configure()
+        }
     }
     
     var body: some Scene {

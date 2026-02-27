@@ -103,7 +103,7 @@ class AuthViewModel: ObservableObject {
             object: nil,
             queue: .main
         ) { [weak self] _ in
-            Task { @MainActor in
+            DispatchQueue.main.async { [weak self] in
                 self?.applySessionInvalidated()
             }
         }
