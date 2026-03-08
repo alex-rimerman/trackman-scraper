@@ -72,12 +72,25 @@ struct AuthMeResponse: Codable {
 
 struct Profile: Codable, Identifiable {
     let id: String
-    let name: String
+    var name: String
     let createdAt: String
+    var pitchCount: Int
+    var avgStuffPlus: Double?
     
     enum CodingKeys: String, CodingKey {
         case id, name
         case createdAt = "created_at"
+        case pitchCount = "pitch_count"
+        case avgStuffPlus = "avg_stuff_plus"
+    }
+    
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        id = try c.decode(String.self, forKey: .id)
+        name = try c.decode(String.self, forKey: .name)
+        createdAt = try c.decode(String.self, forKey: .createdAt)
+        pitchCount = try c.decodeIfPresent(Int.self, forKey: .pitchCount) ?? 0
+        avgStuffPlus = try c.decodeIfPresent(Double.self, forKey: .avgStuffPlus)
     }
 }
 
@@ -103,6 +116,7 @@ struct SavedPitch: Codable, Identifiable {
     let stuffPlusRaw: Double?
     let notes: String?
     let createdAt: String
+    let source: String?
     
     enum CodingKeys: String, CodingKey {
         case id
@@ -123,6 +137,18 @@ struct SavedPitch: Codable, Identifiable {
         case stuffPlusRaw = "stuff_plus_raw"
         case notes
         case createdAt = "created_at"
+        case source
+    }
+    
+    var sourceDisplay: String {
+        switch source ?? "manual" {
+        case "trackman_csv": return "TM CSV"
+        case "hawkeye_csv": return "HE CSV"
+        case "trackman_pdf": return "TM PDF"
+        case "camera": return "Camera"
+        case "manual": return "Manual"
+        default: return source ?? "Manual"
+        }
     }
     
     var pitchTypeDisplay: String {
@@ -179,6 +205,7 @@ struct SavePitchRequest: Codable {
     let stuffPlus: Double?
     let stuffPlusRaw: Double?
     let notes: String?
+    let source: String?
     
     enum CodingKeys: String, CodingKey {
         case profileId = "profile_id"
@@ -197,11 +224,11 @@ struct SavePitchRequest: Codable {
         case pitcherHand = "pitcher_hand"
         case stuffPlus = "stuff_plus"
         case stuffPlusRaw = "stuff_plus_raw"
-        case notes
+        case notes, source
     }
     
     /// Build from PitchData + Stuff+ result
-    static func from(pitchData: PitchData, result: StuffPlusResponse?, profileId: String? = nil) -> SavePitchRequest {
+    static func from(pitchData: PitchData, result: StuffPlusResponse?, profileId: String? = nil, source: String = "manual") -> SavePitchRequest {
         SavePitchRequest(
             profileId: profileId,
             pitchType: pitchData.pitchType.rawValue,
@@ -220,7 +247,46 @@ struct SavePitchRequest: Codable {
             pitcherHand: pitchData.pitcherHand.rawValue,
             stuffPlus: result?.stuffPlus,
             stuffPlusRaw: result?.stuffPlusRaw,
-            notes: pitchData.notes
+            notes: pitchData.notes,
+            source: source
         )
+    }
+}
+
+// MARK: - Update Pitch Request
+
+struct UpdatePitchRequest: Codable {
+    let pitchType: String
+    let pitchSpeed: Double?
+    let inducedVertBreak: Double?
+    let horzBreak: Double?
+    let releaseHeight: Double?
+    let releaseSide: Double?
+    let extensionFt: Double?
+    let totalSpin: Double?
+    let tiltString: String?
+    let spinAxis: Double?
+    let efficiency: Double?
+    let activeSpin: Double?
+    let gyro: Double?
+    let pitcherHand: String
+    let notes: String?
+    let regrade: Bool
+    
+    enum CodingKeys: String, CodingKey {
+        case pitchType = "pitch_type"
+        case pitchSpeed = "pitch_speed"
+        case inducedVertBreak = "induced_vert_break"
+        case horzBreak = "horz_break"
+        case releaseHeight = "release_height"
+        case releaseSide = "release_side"
+        case extensionFt = "extension_ft"
+        case totalSpin = "total_spin"
+        case tiltString = "tilt_string"
+        case spinAxis = "spin_axis"
+        case efficiency, gyro
+        case activeSpin = "active_spin"
+        case pitcherHand = "pitcher_hand"
+        case notes, regrade
     }
 }

@@ -31,6 +31,8 @@
 		8DABA8122F36A0500020EB72 /* TrackmanPDFImporter.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8DABA8132F36A0500020EB72 /* TrackmanPDFImporter.swift */; };
 		8DABA8142F36B0000020EB72 /* SubscriptionRequiredView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8DABA8152F36B0000020EB72 /* SubscriptionRequiredView.swift */; };
 		8DABA8162F36B0000020EB72 /* SubscriptionService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8DABA8172F36B0000020EB72 /* SubscriptionService.swift */; };
+		8DABA8202F36C0000020EB72 /* TrackmanCSVImporter.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8DABA8212F36C0000020EB72 /* TrackmanCSVImporter.swift */; };
+		8DABA8222F37D0000020EB72 /* HawkeyeCSVImporter.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8DABA8232F37D0000020EB72 /* HawkeyeCSVImporter.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -80,6 +82,8 @@
 		8DABA8152F36B0000020EB72 /* SubscriptionRequiredView.swift */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.swift; path = SubscriptionRequiredView.swift; sourceTree = "<group>"; };
 		8DABA8172F36B0000020EB72 /* SubscriptionService.swift */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.swift; path = SubscriptionService.swift; sourceTree = "<group>"; };
 		8DABA8182F36B0000020EB72 /* SubscriptionConfiguration.storekit */ = {isa = PBXFileReference; lastKnownFileType = text; path = SubscriptionConfiguration.storekit; sourceTree = "<group>"; };
+		8DABA8212F36C0000020EB72 /* TrackmanCSVImporter.swift */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.swift; path = TrackmanCSVImporter.swift; sourceTree = "<group>"; };
+		8DABA8232F37D0000020EB72 /* HawkeyeCSVImporter.swift */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.swift; path = HawkeyeCSVImporter.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -158,6 +162,8 @@
 				8DABA6EA2F36A0500020EB72 /* TrackmanOCR.swift */,
 				8DABA8112F36A0500020EB72 /* TrackmanPDFParser.swift */,
 				8DABA8132F36A0500020EB72 /* TrackmanPDFImporter.swift */,
+				8DABA8212F36C0000020EB72 /* TrackmanCSVImporter.swift */,
+				8DABA8232F37D0000020EB72 /* HawkeyeCSVImporter.swift */,
 				8DABA7022F36A0500020EB72 /* AuthService.swift */,
 				8DABA8172F36B0000020EB72 /* SubscriptionService.swift */,
 			);
@@ -359,6 +365,8 @@
 				8DABA6FA2F36A0500020EB72 /* TrackmanOCR.swift in Sources */,
 				8DABA8102F36A0500020EB72 /* TrackmanPDFParser.swift in Sources */,
 				8DABA8122F36A0500020EB72 /* TrackmanPDFImporter.swift in Sources */,
+				8DABA8202F36C0000020EB72 /* TrackmanCSVImporter.swift in Sources */,
+				8DABA8222F37D0000020EB72 /* HawkeyeCSVImporter.swift in Sources */,
 				8DABA6FD2F36A0500020EB72 /* ContentView.swift in Sources */,
 				8DABA6F72F36A0500020EB72 /* LiveDataApp.swift in Sources */,
 				8DABA6FB2F36A0500020EB72 /* PitchAnalysisViewModel.swift in Sources */,
@@ -535,13 +543,13 @@
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 9;
+				CURRENT_PROJECT_VERSION = 13;
 				DEVELOPMENT_ASSET_PATHS = "";
 				DEVELOPMENT_TEAM = FBG4AT9NN6;
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_FILE = ../Info.plist;
-				INFOPLIST_KEY_CFBundleDisplayName = "Stuff+";
+				INFOPLIST_KEY_CFBundleDisplayName = "Arsenal IQ";
 				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
 				INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES;
 				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
@@ -551,7 +559,7 @@
 					"$(inherited)",
 					"@executable_path/Frameworks",
 				);
-				MARKETING_VERSION = 1.3;
+				MARKETING_VERSION = 1.4;
 				PRODUCT_BUNDLE_IDENTIFIER = "my-stuff.LiveData";
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SWIFT_EMIT_LOC_STRINGS = YES;
@@ -566,13 +574,13 @@
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 9;
+				CURRENT_PROJECT_VERSION = 13;
 				DEVELOPMENT_ASSET_PATHS = "";
 				DEVELOPMENT_TEAM = FBG4AT9NN6;
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_FILE = ../Info.plist;
-				INFOPLIST_KEY_CFBundleDisplayName = "Stuff+";
+				INFOPLIST_KEY_CFBundleDisplayName = "Arsenal IQ";
 				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
 				INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES;
 				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
@@ -582,7 +590,7 @@
 					"$(inherited)",
 					"@executable_path/Frameworks",
 				);
-				MARKETING_VERSION = 1.3;
+				MARKETING_VERSION = 1.4;
 				PRODUCT_BUNDLE_IDENTIFIER = "my-stuff.LiveData";
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SWIFT_EMIT_LOC_STRINGS = YES;

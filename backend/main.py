@@ -10,7 +10,7 @@ Usage:
     uvicorn main:app --host 0.0.0.0 --port 8000 --reload
 """
 
-from fastapi import FastAPI, HTTPException, Depends, status, Request
+from fastapi import FastAPI, HTTPException, Depends, File, Request, UploadFile, Form
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from pydantic import BaseModel, Field
@@ -21,9 +21,14 @@ import os
 import sys
 import sqlite3
 import json
+import csv
+import io
+import tempfile
 import uuid
 from datetime import datetime, timedelta, timezone
 from contextlib import contextmanager
+
+from trackman_parser import _spin_axis_from_movement, parse_trackman_pdf
 
 from jose import jwt, JWTError
 import bcrypt
@@ -182,6 +187,13 @@ def migrate_db():
                 conn.commit()
             except sqlite3.OperationalError:
                 pass
+
+        # Add source column to pitches
+        try:
+            conn.execute("ALTER TABLE pitches ADD COLUMN source TEXT DEFAULT 'manual'")
+            conn.commit()
+        except sqlite3.OperationalError:
+            pass
 
         # Migrate: for users with no profile, create one and assign pitches (existing users → personal)
         users = conn.execute("SELECT id, name FROM users").fetchall()
@@ -360,10 +372,21 @@ class ProfileResponse(BaseModel):
     id: str
     name: str
     created_at: str
+    pitch_count: int = 0
+    avg_stuff_plus: Optional[float] = None
 
 
 class CreateProfileRequest(BaseModel):
     name: str
+
+
+class RenameProfileRequest(BaseModel):
+    name: str
+
+
+class MergeProfilesRequest(BaseModel):
+    source_profile_id: str
+    target_profile_id: str
 
 # Pitch prediction
 class PitchRequest(BaseModel):
@@ -392,7 +415,7 @@ class SuggestResponse(BaseModel):
 
 # Saved pitch
 class SavePitchRequest(BaseModel):
-    profile_id: Optional[str] = None  # Required for team; for personal, use default profile
+    profile_id: Optional[str] = None
     pitch_type: str
     pitch_speed: Optional[float] = None
     induced_vert_break: Optional[float] = None
@@ -410,6 +433,24 @@ class SavePitchRequest(BaseModel):
     stuff_plus: Optional[float] = None
     stuff_plus_raw: Optional[float] = None
     notes: Optional[str] = None
+    source: str = "manual"
+
+class ParsedTrackmanPitch(BaseModel):
+    """Single pitch from Trackman PDF parse (color-based type, not velocity)."""
+    pitch_type: str
+    pitch_speed: Optional[float] = None
+    induced_vert_break: Optional[float] = None
+    horz_break: Optional[float] = None
+    release_height: Optional[float] = None
+    release_side: Optional[float] = None
+    extension_ft: Optional[float] = None
+    total_spin: Optional[float] = None
+    efficiency: Optional[float] = None
+    spin_axis: Optional[float] = None
+    tilt_string: Optional[str] = None
+    stuff_plus: Optional[float] = None
+    stuff_plus_raw: Optional[float] = None
+
 
 class SavedPitchResponse(BaseModel):
     id: str
@@ -431,6 +472,23 @@ class SavedPitchResponse(BaseModel):
     stuff_plus_raw: Optional[float] = None
     notes: Optional[str] = None
     created_at: str
+    source: Optional[str] = "manual"
+
+
+class CSVPitcherSummary(BaseModel):
+    """Per-pitcher summary returned from CSV import."""
+    pitcher_name: str
+    profile_id: str
+    profile_created: bool
+    pitcher_hand: str
+    pitch_count: int
+    pitch_ids: list[str]
+
+
+class CSVImportResponse(BaseModel):
+    """Response from Trackman CSV import."""
+    total_pitches: int
+    pitchers: list[CSVPitcherSummary]
 
 
 # ---------------------------------------------------------------------------
@@ -693,11 +751,22 @@ async def get_profiles(payload: dict = Depends(require_subscription)):
     user_id = payload["sub"]
     with get_db() as conn:
         rows = conn.execute(
-            "SELECT id, name, created_at FROM profiles WHERE user_id = ? ORDER BY name ASC",
+            """SELECT p.id, p.name, p.created_at,
+                      COUNT(pi.id) AS pitch_count,
+                      AVG(pi.stuff_plus) AS avg_stuff_plus
+               FROM profiles p
+               LEFT JOIN pitches pi ON pi.profile_id = p.id
+               WHERE p.user_id = ?
+               GROUP BY p.id
+               ORDER BY p.name ASC""",
             (user_id,),
         ).fetchall()
     return [
-        ProfileResponse(id=r["id"], name=r["name"], created_at=r["created_at"])
+        ProfileResponse(
+            id=r["id"], name=r["name"], created_at=r["created_at"],
+            pitch_count=r["pitch_count"],
+            avg_stuff_plus=round(r["avg_stuff_plus"], 1) if r["avg_stuff_plus"] else None,
+        )
         for r in rows
     ]
 
@@ -715,10 +784,89 @@ async def create_profile(
             (profile_id, payload["sub"], (req.name or "New Profile").strip(), now),
         )
         conn.commit()
-        row = conn.execute(
-            "SELECT id, name, created_at FROM profiles WHERE id = ?", (profile_id,)
+    return ProfileResponse(id=profile_id, name=(req.name or "New Profile").strip(), created_at=now)
+
+
+@app.put("/profiles/{profile_id}", response_model=ProfileResponse)
+async def rename_profile(profile_id: str, req: RenameProfileRequest, payload: dict = Depends(require_subscription)):
+    """Rename a profile."""
+    user_id = payload["sub"]
+    new_name = (req.name or "").strip()
+    if not new_name:
+        raise HTTPException(status_code=400, detail="Name cannot be empty")
+    with get_db() as conn:
+        profile = conn.execute(
+            "SELECT * FROM profiles WHERE id = ? AND user_id = ?", (profile_id, user_id)
         ).fetchone()
-    return ProfileResponse(id=row["id"], name=row["name"], created_at=row["created_at"])
+        if not profile:
+            raise HTTPException(status_code=404, detail="Profile not found")
+        conn.execute("UPDATE profiles SET name = ? WHERE id = ?", (new_name, profile_id))
+        conn.commit()
+        pitch_count = conn.execute(
+            "SELECT COUNT(*) as c FROM pitches WHERE profile_id = ?", (profile_id,)
+        ).fetchone()["c"]
+        avg_sp = conn.execute(
+            "SELECT AVG(stuff_plus) as a FROM pitches WHERE profile_id = ?", (profile_id,)
+        ).fetchone()["a"]
+    return ProfileResponse(
+        id=profile_id, name=new_name, created_at=profile["created_at"],
+        pitch_count=pitch_count,
+        avg_stuff_plus=round(avg_sp, 1) if avg_sp else None,
+    )
+
+
+@app.post("/profiles/merge")
+async def merge_profiles(req: MergeProfilesRequest, payload: dict = Depends(require_subscription)):
+    """Merge source profile into target. Moves all pitches, then deletes source profile. Team accounts only."""
+    user_id = payload["sub"]
+    with get_db() as conn:
+        user = conn.execute("SELECT account_type FROM users WHERE id = ?", (user_id,)).fetchone()
+    if not user or (user["account_type"] or "personal") != "team":
+        raise HTTPException(status_code=403, detail="Profile merge is only available for team accounts")
+    if req.source_profile_id == req.target_profile_id:
+        raise HTTPException(status_code=400, detail="Cannot merge a profile into itself")
+
+    with get_db() as conn:
+        src = conn.execute("SELECT id FROM profiles WHERE id = ? AND user_id = ?", (req.source_profile_id, user_id)).fetchone()
+        tgt = conn.execute("SELECT id FROM profiles WHERE id = ? AND user_id = ?", (req.target_profile_id, user_id)).fetchone()
+        if not src:
+            raise HTTPException(status_code=404, detail="Source profile not found")
+        if not tgt:
+            raise HTTPException(status_code=404, detail="Target profile not found")
+
+        moved = conn.execute(
+            "UPDATE pitches SET profile_id = ? WHERE profile_id = ? AND user_id = ?",
+            (req.target_profile_id, req.source_profile_id, user_id),
+        ).rowcount
+        conn.execute("DELETE FROM profiles WHERE id = ? AND user_id = ?", (req.source_profile_id, user_id))
+        conn.commit()
+
+    return {"detail": "Profiles merged", "pitches_moved": moved}
+
+
+@app.delete("/profiles/{profile_id}", status_code=200)
+async def delete_profile(profile_id: str, payload: dict = Depends(require_subscription)):
+    """Delete a profile and all its pitches. Team accounts only."""
+    user_id = payload["sub"]
+    with get_db() as conn:
+        user = conn.execute("SELECT account_type FROM users WHERE id = ?", (user_id,)).fetchone()
+    if not user or (user["account_type"] or "personal") != "team":
+        raise HTTPException(status_code=403, detail="Profile deletion is only available for team accounts")
+
+    with get_db() as conn:
+        profile = conn.execute(
+            "SELECT id FROM profiles WHERE id = ? AND user_id = ?", (profile_id, user_id)
+        ).fetchone()
+        if not profile:
+            raise HTTPException(status_code=404, detail="Profile not found")
+
+        deleted_pitches = conn.execute(
+            "DELETE FROM pitches WHERE profile_id = ? AND user_id = ?", (profile_id, user_id)
+        ).rowcount
+        conn.execute("DELETE FROM profiles WHERE id = ? AND user_id = ?", (profile_id, user_id))
+        conn.commit()
+
+    return {"detail": "Profile deleted", "deleted_pitches": deleted_pitches}
 
 
 # ---------------------------------------------------------------------------
@@ -870,6 +1018,381 @@ async def suggest_improvement(request: Request, pitch_request: PitchRequest, pay
 
 
 # ---------------------------------------------------------------------------
+# Trackman PDF parse (auth required)
+# ---------------------------------------------------------------------------
+
+INCH_TO_FT = 1.0 / 12.0
+
+
+@app.post("/parse-trackman-pdf", response_model=list[ParsedTrackmanPitch])
+@limiter.limit("20/hour")
+async def parse_trackman_pdf_endpoint(
+    request: Request,
+    file: UploadFile = File(...),
+    payload: dict = Depends(require_subscription),
+):
+    """Parse Trackman PDF using color tags for pitch type (same logic as trackman_pdf_parser). Returns per-pitch data."""
+    if not file.filename or not file.filename.lower().endswith(".pdf"):
+        raise HTTPException(status_code=400, detail="PDF file required")
+    content = await file.read()
+    if len(content) < 100:
+        raise HTTPException(status_code=400, detail="File too small or invalid PDF")
+    with tempfile.NamedTemporaryFile(suffix=".pdf", delete=False) as tmp:
+        tmp.write(content)
+        tmp_path = tmp.name
+    try:
+        pitches = parse_trackman_pdf(tmp_path)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    finally:
+        try:
+            os.unlink(tmp_path)
+        except OSError:
+            pass
+
+    # Get fastball reference (first FF or SI, or highest velo among them)
+    fb_candidates = [p for p in pitches if p["pitch_type"] in ("FF", "SI") and p.get("pitch_speed")]
+    if fb_candidates:
+        fb_ref = max(fb_candidates, key=lambda x: x["pitch_speed"])
+        fb_velo = fb_ref["pitch_speed"]
+        fb_ivb = (fb_ref.get("induced_vert_break") or 0) * INCH_TO_FT
+        fb_hmov = -(fb_ref.get("horz_break") or 0) * INCH_TO_FT
+    else:
+        fb_velo = fb_ivb = fb_hmov = None
+
+    result = []
+    for p in pitches:
+        pt = p["pitch_type"]
+        velo = p.get("pitch_speed") or 0
+        ivb = p.get("induced_vert_break") or 0
+        hb = p.get("horz_break") or 0
+        stuff_plus = stuff_plus_raw = None
+        if model_college and fb_velo is not None:
+            pfx_z = ivb * INCH_TO_FT
+            pfx_x = -hb * INCH_TO_FT
+            spin_axis = p.get("spin_axis") or _spin_axis_from_movement(ivb, hb)
+            ext = p.get("extension_ft") or 6.0
+            spin = p.get("total_spin") or 2000.0
+            relh = p.get("release_height") or 5.0
+            rels = p.get("release_side") or 0.0
+            try:
+                stuff_plus_raw = _run_prediction(
+                    pt, velo, pfx_x, pfx_z, ext, spin, spin_axis,
+                    -rels, relh, "R", fb_velo, fb_ivb, fb_hmov,
+                )
+                stuff_plus = round(stuff_plus_raw, 1)
+            except Exception:
+                pass
+        result.append(ParsedTrackmanPitch(
+            pitch_type=pt,
+            pitch_speed=p.get("pitch_speed"),
+            induced_vert_break=p.get("induced_vert_break"),
+            horz_break=p.get("horz_break"),
+            release_height=p.get("release_height"),
+            release_side=p.get("release_side"),
+            extension_ft=p.get("extension_ft"),
+            total_spin=p.get("total_spin"),
+            efficiency=p.get("efficiency"),
+            spin_axis=p.get("spin_axis"),
+            tilt_string=p.get("tilt_string"),
+            stuff_plus=stuff_plus,
+            stuff_plus_raw=stuff_plus_raw,
+        ))
+    return result
+
+
+# ---------------------------------------------------------------------------
+# Trackman CSV parse + bulk import (team accounts)
+# ---------------------------------------------------------------------------
+
+CSV_PITCH_TYPE_MAP = {
+    "fastball": "FF",
+    "four-seam": "FF",
+    "fourseam": "FF",
+    "sinker": "SI",
+    "two-seam": "SI",
+    "twoseam": "SI",
+    "cutter": "FC",
+    "slider": "SL",
+    "curveball": "CU",
+    "curve": "CU",
+    "changeup": "CH",
+    "change-up": "CH",
+    "splitter": "FS",
+    "split-finger": "FS",
+    "sweeper": "ST",
+    "knuckle curve": "KC",
+    "knucklecurve": "KC",
+}
+
+
+def _safe_float(val: str) -> Optional[float]:
+    if not val or not val.strip():
+        return None
+    try:
+        return float(val.strip())
+    except (ValueError, TypeError):
+        return None
+
+
+def _parse_csv_rows(content: str) -> list[dict]:
+    """Parse Trackman CSV content into list of pitch dicts grouped by pitcher."""
+    reader = csv.DictReader(io.StringIO(content))
+    pitches = []
+    for row in reader:
+        pitcher_name = (row.get("Pitcher") or "").strip().strip('"')
+        if not pitcher_name:
+            continue
+        tagged_type = (row.get("TaggedPitchType") or "").strip()
+        if not tagged_type:
+            continue
+
+        pitch_type = CSV_PITCH_TYPE_MAP.get(tagged_type.lower(), tagged_type.upper()[:2])
+        pitcher_throws = (row.get("PitcherThrows") or "Right").strip()
+        hand = "L" if pitcher_throws.lower().startswith("l") else "R"
+
+        efficiency = None
+        spin_rate = _safe_float(row.get("SpinRate"))
+        active_spin = _safe_float(row.get("SpinAxis3dActiveSpinRate"))
+        if spin_rate and active_spin and spin_rate > 0:
+            efficiency = round((active_spin / spin_rate) * 100, 1)
+
+        pitches.append({
+            "pitcher_name": pitcher_name,
+            "pitcher_hand": hand,
+            "pitch_type": pitch_type,
+            "pitch_speed": _safe_float(row.get("RelSpeed")),
+            "total_spin": spin_rate,
+            "spin_axis": _safe_float(row.get("SpinAxis")),
+            "tilt_string": (row.get("Tilt") or "").strip() or None,
+            "release_height": _safe_float(row.get("RelHeight")),
+            "release_side": _safe_float(row.get("RelSide")),
+            "extension_ft": _safe_float(row.get("Extension")),
+            "induced_vert_break": _safe_float(row.get("InducedVertBreak")),
+            "horz_break": _safe_float(row.get("HorzBreak")),
+            "efficiency": efficiency,
+        })
+    return pitches
+
+
+VALID_PITCH_CODES = {"FF", "SI", "FC", "SL", "CU", "CH", "ST", "FS", "KC"}
+
+
+def _parse_hawkeye_csv_rows(content: str) -> list[dict]:
+    """Parse Hawkeye/Statcast CSV into pitch dicts.
+    Hawkeye convention has opposite signs for HorzBreak and RelSide vs Trackman.
+    We negate both on ingestion so stored data is in Trackman convention."""
+    reader = csv.DictReader(io.StringIO(content))
+    pitches = []
+    for row in reader:
+        pitcher_name = (row.get("Pitcher") or "").strip().strip('"')
+        if not pitcher_name:
+            continue
+        tagged_type = (row.get("TaggedPitchType") or "").strip().upper()
+        if tagged_type not in VALID_PITCH_CODES:
+            mapped = CSV_PITCH_TYPE_MAP.get(tagged_type.lower())
+            if mapped:
+                tagged_type = mapped
+            else:
+                continue
+
+        pitcher_throws = (row.get("PitcherThrows") or "Right").strip()
+        hand = "L" if pitcher_throws.lower().startswith("l") else "R"
+
+        raw_hb = _safe_float(row.get("HorzBreak"))
+        raw_rel_side = _safe_float(row.get("RelSide"))
+
+        pitches.append({
+            "pitcher_name": pitcher_name,
+            "pitcher_hand": hand,
+            "pitch_type": tagged_type,
+            "pitch_speed": _safe_float(row.get("RelSpeed")),
+            "total_spin": _safe_float(row.get("SpinRate")),
+            "spin_axis": _safe_float(row.get("SpinAxis")),
+            "tilt_string": None,
+            "release_height": _safe_float(row.get("RelHeight")),
+            "release_side": -raw_rel_side if raw_rel_side is not None else None,
+            "extension_ft": _safe_float(row.get("Extension")),
+            "induced_vert_break": _safe_float(row.get("InducedVertBreak")),
+            "horz_break": -raw_hb if raw_hb is not None else None,
+            "efficiency": None,
+        })
+    return pitches
+
+
+def _bulk_import_pitches(
+    pitches: list[dict],
+    user_id: str,
+    profile_map: dict[str, str],
+    source: str = "trackman_csv",
+) -> tuple[int, list[CSVPitcherSummary], dict[str, str]]:
+    """Shared logic: group pitches by pitcher, create/match profiles, compute Stuff+, save.
+    Returns (total_saved, summaries, updated_profile_map)."""
+    pitchers: dict[str, list[dict]] = {}
+    for p in pitches:
+        pitchers.setdefault(p["pitcher_name"], []).append(p)
+
+    now = datetime.now(timezone.utc).isoformat()
+    summaries: list[CSVPitcherSummary] = []
+    total_saved = 0
+
+    for pitcher_name, pitcher_pitches in pitchers.items():
+        pitcher_key = pitcher_name.strip().lower()
+        profile_created = False
+
+        if pitcher_key in profile_map:
+            profile_id = profile_map[pitcher_key]
+        else:
+            profile_id = str(uuid.uuid4())
+            with get_db() as conn:
+                conn.execute(
+                    "INSERT INTO profiles (id, user_id, name, created_at) VALUES (?, ?, ?, ?)",
+                    (profile_id, user_id, pitcher_name.strip(), now),
+                )
+                conn.commit()
+            profile_map[pitcher_key] = profile_id
+            profile_created = True
+
+        hand = pitcher_pitches[0]["pitcher_hand"]
+
+        fb_candidates = [
+            p for p in pitcher_pitches
+            if p["pitch_type"] in ("FF", "SI") and p.get("pitch_speed")
+        ]
+        if fb_candidates:
+            fb_ref = max(fb_candidates, key=lambda x: x["pitch_speed"])
+            fb_velo = fb_ref["pitch_speed"]
+            fb_ivb = (fb_ref.get("induced_vert_break") or 0) * INCH_TO_FT
+            fb_hmov = -(fb_ref.get("horz_break") or 0) * INCH_TO_FT
+        else:
+            fb_velo = fb_ivb = fb_hmov = None
+
+        saved_ids: list[str] = []
+        with get_db() as conn:
+            for p in pitcher_pitches:
+                pt = p["pitch_type"]
+                velo = p.get("pitch_speed") or 0
+                ivb = p.get("induced_vert_break") or 0
+                hb = p.get("horz_break") or 0
+                stuff_plus = stuff_plus_raw = None
+
+                if model_college and fb_velo is not None and velo > 0:
+                    pfx_z = ivb * INCH_TO_FT
+                    pfx_x = -hb * INCH_TO_FT
+                    spin_axis = p.get("spin_axis") or _spin_axis_from_movement(ivb, hb)
+                    ext = p.get("extension_ft") or 6.0
+                    spin = p.get("total_spin") or 2000.0
+                    relh = p.get("release_height") or 5.0
+                    rels = p.get("release_side") or 0.0
+                    try:
+                        stuff_plus_raw = _run_prediction(
+                            pt, velo, pfx_x, pfx_z, ext, spin, spin_axis,
+                            -rels, relh, hand, fb_velo, fb_ivb, fb_hmov,
+                        )
+                        stuff_plus = round(stuff_plus_raw, 1)
+                    except Exception:
+                        pass
+
+                pitch_id = str(uuid.uuid4())
+                conn.execute(
+                    """INSERT INTO pitches
+                       (id, user_id, profile_id, pitch_type, pitch_speed, induced_vert_break, horz_break,
+                        release_height, release_side, extension_ft, total_spin, tilt_string,
+                        spin_axis, efficiency, active_spin, gyro, pitcher_hand,
+                        stuff_plus, stuff_plus_raw, notes, source, created_at)
+                       VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+                    (
+                        pitch_id, user_id, profile_id, pt, p.get("pitch_speed"),
+                        p.get("induced_vert_break"), p.get("horz_break"),
+                        p.get("release_height"), p.get("release_side"),
+                        p.get("extension_ft"), p.get("total_spin"),
+                        p.get("tilt_string"), p.get("spin_axis"),
+                        p.get("efficiency"), None, None, hand,
+                        stuff_plus, stuff_plus_raw, None, source, now,
+                    ),
+                )
+                saved_ids.append(pitch_id)
+            conn.commit()
+
+        total_saved += len(saved_ids)
+        summaries.append(CSVPitcherSummary(
+            pitcher_name=pitcher_name.strip(),
+            profile_id=profile_id,
+            profile_created=profile_created,
+            pitcher_hand=hand,
+            pitch_count=len(saved_ids),
+            pitch_ids=saved_ids,
+        ))
+
+    return total_saved, summaries, profile_map
+
+
+@app.post("/parse-trackman-csv", response_model=CSVImportResponse)
+@limiter.limit("20/hour")
+async def parse_trackman_csv_endpoint(
+    request: Request,
+    file: UploadFile = File(...),
+    payload: dict = Depends(require_subscription),
+):
+    """Parse Trackman CSV, create/match profiles per pitcher, compute Stuff+, and save all pitches.
+    Team accounts only. Returns per-pitcher summary."""
+    user_id = payload["sub"]
+    with get_db() as conn:
+        user = conn.execute("SELECT account_type FROM users WHERE id = ?", (user_id,)).fetchone()
+    if not user or (user["account_type"] or "personal") != "team":
+        raise HTTPException(status_code=403, detail="CSV import is only available for team accounts")
+    if not file.filename or not file.filename.lower().endswith(".csv"):
+        raise HTTPException(status_code=400, detail="CSV file required")
+    raw = await file.read()
+    if len(raw) < 50:
+        raise HTTPException(status_code=400, detail="File too small or empty")
+
+    pitches = _parse_csv_rows(raw.decode("utf-8-sig"))
+    if not pitches:
+        raise HTTPException(status_code=400, detail="No valid pitch rows found in CSV")
+
+    with get_db() as conn:
+        existing = conn.execute("SELECT id, name FROM profiles WHERE user_id = ?", (user_id,)).fetchall()
+    profile_map = {row["name"].strip().lower(): row["id"] for row in existing}
+
+    total_saved, summaries, _ = _bulk_import_pitches(pitches, user_id, profile_map)
+    return CSVImportResponse(total_pitches=total_saved, pitchers=summaries)
+
+
+@app.post("/parse-hawkeye-csv", response_model=CSVImportResponse)
+@limiter.limit("20/hour")
+async def parse_hawkeye_csv_endpoint(
+    request: Request,
+    file: UploadFile = File(...),
+    payload: dict = Depends(require_subscription),
+):
+    """Parse Hawkeye/Statcast CSV. Flips HorzBreak and RelSide to Trackman convention,
+    then creates/matches profiles, computes Stuff+, and saves all pitches.
+    Team accounts only."""
+    user_id = payload["sub"]
+    with get_db() as conn:
+        user = conn.execute("SELECT account_type FROM users WHERE id = ?", (user_id,)).fetchone()
+    if not user or (user["account_type"] or "personal") != "team":
+        raise HTTPException(status_code=403, detail="CSV import is only available for team accounts")
+    if not file.filename or not file.filename.lower().endswith(".csv"):
+        raise HTTPException(status_code=400, detail="CSV file required")
+    raw = await file.read()
+    if len(raw) < 50:
+        raise HTTPException(status_code=400, detail="File too small or empty")
+
+    pitches = _parse_hawkeye_csv_rows(raw.decode("utf-8-sig"))
+    if not pitches:
+        raise HTTPException(status_code=400, detail="No valid pitch rows found in CSV")
+
+    with get_db() as conn:
+        existing = conn.execute("SELECT id, name FROM profiles WHERE user_id = ?", (user_id,)).fetchall()
+    profile_map = {row["name"].strip().lower(): row["id"] for row in existing}
+
+    total_saved, summaries, _ = _bulk_import_pitches(pitches, user_id, profile_map, source="hawkeye_csv")
+    return CSVImportResponse(total_pitches=total_saved, pitchers=summaries)
+
+
+# ---------------------------------------------------------------------------
 # Pitch storage (auth required)
 # ---------------------------------------------------------------------------
 
@@ -899,15 +1422,15 @@ async def save_pitch(req: SavePitchRequest, payload: dict = Depends(require_subs
                (id, user_id, profile_id, pitch_type, pitch_speed, induced_vert_break, horz_break,
                 release_height, release_side, extension_ft, total_spin, tilt_string,
                 spin_axis, efficiency, active_spin, gyro, pitcher_hand,
-                stuff_plus, stuff_plus_raw, notes, created_at)
-               VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+                stuff_plus, stuff_plus_raw, notes, source, created_at)
+               VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
             (
                 pitch_id, user_id, profile_id, req.pitch_type, req.pitch_speed,
                 req.induced_vert_break, req.horz_break, req.release_height,
                 req.release_side, req.extension_ft, req.total_spin,
                 req.tilt_string, req.spin_axis, req.efficiency, req.active_spin,
                 req.gyro, req.pitcher_hand, req.stuff_plus, req.stuff_plus_raw,
-                req.notes, now,
+                req.notes, req.source, now,
             ),
         )
         conn.commit()
@@ -921,7 +1444,7 @@ async def save_pitch(req: SavePitchRequest, payload: dict = Depends(require_subs
         efficiency=req.efficiency, active_spin=req.active_spin,
         gyro=req.gyro, pitcher_hand=req.pitcher_hand,
         stuff_plus=req.stuff_plus, stuff_plus_raw=req.stuff_plus_raw,
-        notes=req.notes, created_at=now,
+        notes=req.notes, created_at=now, source=req.source,
     )
 
 
@@ -931,26 +1454,44 @@ async def get_pitches(
     limit: int = 50,
     offset: int = 0,
     pitch_type: Optional[str] = None,
-    profile_id: Optional[str] = None
+    profile_id: Optional[str] = None,
+    date_from: Optional[str] = None,
+    date_to: Optional[str] = None,
+    stuff_min: Optional[float] = None,
+    stuff_max: Optional[float] = None,
+    source: Optional[str] = None,
 ):
-    """Get user's pitches with pagination and filtering. When profile_id is provided, only returns pitches for that profile."""
+    """Get pitches with pagination and filtering (pitch type, date range, Stuff+ range, source)."""
     user_id = payload["sub"]
-    
-    # Build query with optional filters
+
     query = "SELECT * FROM pitches WHERE user_id = ?"
-    params = [user_id]
-    
+    params: list = [user_id]
+
     if profile_id:
         query += " AND profile_id = ?"
         params.append(profile_id)
-    
     if pitch_type:
         query += " AND pitch_type = ?"
         params.append(pitch_type.upper())
-    
+    if date_from:
+        query += " AND created_at >= ?"
+        params.append(date_from)
+    if date_to:
+        query += " AND created_at <= ?"
+        params.append(date_to)
+    if stuff_min is not None:
+        query += " AND stuff_plus >= ?"
+        params.append(stuff_min)
+    if stuff_max is not None:
+        query += " AND stuff_plus <= ?"
+        params.append(stuff_max)
+    if source:
+        query += " AND source = ?"
+        params.append(source)
+
     query += " ORDER BY created_at DESC LIMIT ? OFFSET ?"
     params.extend([limit, offset])
-    
+
     with get_db() as conn:
         if profile_id:
             owner = conn.execute(
@@ -959,8 +1500,9 @@ async def get_pitches(
             if not owner or owner["user_id"] != user_id:
                 raise HTTPException(status_code=403, detail="Invalid profile")
         rows = conn.execute(query, params).fetchall()
-    return [
-        SavedPitchResponse(
+
+    def _pitch(r):
+        return SavedPitchResponse(
             id=r["id"], pitch_type=r["pitch_type"], pitch_speed=r["pitch_speed"],
             induced_vert_break=r["induced_vert_break"], horz_break=r["horz_break"],
             release_height=r["release_height"], release_side=r["release_side"],
@@ -970,9 +1512,195 @@ async def get_pitches(
             gyro=r["gyro"], pitcher_hand=r["pitcher_hand"],
             stuff_plus=r["stuff_plus"], stuff_plus_raw=r["stuff_plus_raw"],
             notes=r["notes"], created_at=r["created_at"],
+            source=r["source"] if "source" in r.keys() else "manual",
         )
-        for r in rows
+    return [_pitch(r) for r in rows]
+
+
+@app.get("/pitches/export")
+async def export_pitches_csv(
+    payload: dict = Depends(require_subscription),
+    profile_id: Optional[str] = None,
+    pitch_type: Optional[str] = None,
+    date_from: Optional[str] = None,
+    date_to: Optional[str] = None,
+    stuff_min: Optional[float] = None,
+    stuff_max: Optional[float] = None,
+    source: Optional[str] = None,
+):
+    """Export filtered pitches as a downloadable CSV."""
+    from starlette.responses import StreamingResponse
+    user_id = payload["sub"]
+
+    query = "SELECT * FROM pitches WHERE user_id = ?"
+    params: list = [user_id]
+    if profile_id:
+        query += " AND profile_id = ?"
+        params.append(profile_id)
+    if pitch_type:
+        query += " AND pitch_type = ?"
+        params.append(pitch_type.upper())
+    if date_from:
+        query += " AND created_at >= ?"
+        params.append(date_from)
+    if date_to:
+        query += " AND created_at <= ?"
+        params.append(date_to)
+    if stuff_min is not None:
+        query += " AND stuff_plus >= ?"
+        params.append(stuff_min)
+    if stuff_max is not None:
+        query += " AND stuff_plus <= ?"
+        params.append(stuff_max)
+    if source:
+        query += " AND source = ?"
+        params.append(source)
+    query += " ORDER BY created_at DESC"
+
+    with get_db() as conn:
+        rows = conn.execute(query, params).fetchall()
+
+    cols = [
+        "pitch_type", "pitch_speed", "induced_vert_break", "horz_break",
+        "release_height", "release_side", "extension_ft", "total_spin",
+        "spin_axis", "efficiency", "pitcher_hand", "stuff_plus", "notes",
+        "source", "created_at",
     ]
+    output = io.StringIO()
+    writer = csv.writer(output)
+    writer.writerow(cols)
+    for r in rows:
+        writer.writerow([r[c] if c in r.keys() else "" for c in cols])
+
+    output.seek(0)
+    return StreamingResponse(
+        output,
+        media_type="text/csv",
+        headers={"Content-Disposition": "attachment; filename=pitches_export.csv"},
+    )
+
+
+class UpdatePitchRequest(BaseModel):
+    """Fields that can be updated on a saved pitch. All optional — only provided fields are changed."""
+    pitch_type: Optional[str] = None
+    pitch_speed: Optional[float] = None
+    induced_vert_break: Optional[float] = None
+    horz_break: Optional[float] = None
+    release_height: Optional[float] = None
+    release_side: Optional[float] = None
+    extension_ft: Optional[float] = None
+    total_spin: Optional[float] = None
+    tilt_string: Optional[str] = None
+    spin_axis: Optional[float] = None
+    efficiency: Optional[float] = None
+    active_spin: Optional[float] = None
+    gyro: Optional[float] = None
+    pitcher_hand: Optional[str] = None
+    notes: Optional[str] = None
+    regrade: bool = True
+
+
+@app.put("/pitches/{pitch_id}", response_model=SavedPitchResponse)
+async def update_pitch(pitch_id: str, req: UpdatePitchRequest, payload: dict = Depends(require_subscription)):
+    """Update a saved pitch's data fields. When regrade=true (default), re-runs the Stuff+ model."""
+    user_id = payload["sub"]
+    with get_db() as conn:
+        row = conn.execute(
+            "SELECT * FROM pitches WHERE id = ? AND user_id = ?", (pitch_id, user_id)
+        ).fetchone()
+        if not row:
+            raise HTTPException(status_code=404, detail="Pitch not found")
+
+        current = dict(row)
+        updates = req.model_dump(exclude={"regrade"}, exclude_none=True)
+        for k, v in updates.items():
+            current[k] = v
+
+        stuff_plus = current.get("stuff_plus")
+        stuff_plus_raw = current.get("stuff_plus_raw")
+
+        if req.regrade and model_college:
+            pt = current["pitch_type"]
+            velo = current.get("pitch_speed") or 0
+            ivb = current.get("induced_vert_break") or 0
+            hb = current.get("horz_break") or 0
+            hand = current.get("pitcher_hand") or "R"
+            ext = current.get("extension_ft") or 6.0
+            spin = current.get("total_spin") or 2000.0
+            sa = current.get("spin_axis") or _spin_axis_from_movement(ivb, hb)
+            relh = current.get("release_height") or 5.0
+            rels = current.get("release_side") or 0.0
+
+            # Find fastball reference from this user+profile
+            fb_velo = fb_ivb = fb_hmov = None
+            profile_id = current.get("profile_id")
+            fb_rows = conn.execute(
+                """SELECT pitch_speed, induced_vert_break, horz_break FROM pitches
+                   WHERE user_id = ? AND profile_id = ? AND pitch_type IN ('FF','SI')
+                   AND pitch_speed IS NOT NULL ORDER BY pitch_speed DESC LIMIT 5""",
+                (user_id, profile_id),
+            ).fetchall()
+            if fb_rows:
+                fb_velo = fb_rows[0]["pitch_speed"]
+                fb_ivb = (fb_rows[0]["induced_vert_break"] or 0) * INCH_TO_FT
+                fb_hmov = -(fb_rows[0]["horz_break"] or 0) * INCH_TO_FT
+            elif pt in ("FF", "SI") and velo > 0:
+                fb_velo = velo
+                fb_ivb = ivb * INCH_TO_FT
+                fb_hmov = -hb * INCH_TO_FT
+
+            if fb_velo and velo > 0:
+                try:
+                    stuff_plus_raw = _run_prediction(
+                        pt, velo, -hb * INCH_TO_FT, ivb * INCH_TO_FT,
+                        ext, spin, sa, -rels, relh, hand,
+                        fb_velo, fb_ivb, fb_hmov,
+                    )
+                    stuff_plus = round(stuff_plus_raw, 1)
+                except Exception:
+                    pass
+
+        conn.execute(
+            """UPDATE pitches SET
+                pitch_type=?, pitch_speed=?, induced_vert_break=?, horz_break=?,
+                release_height=?, release_side=?, extension_ft=?, total_spin=?,
+                tilt_string=?, spin_axis=?, efficiency=?, active_spin=?, gyro=?,
+                pitcher_hand=?, stuff_plus=?, stuff_plus_raw=?, notes=?
+               WHERE id=? AND user_id=?""",
+            (
+                current["pitch_type"], current.get("pitch_speed"),
+                current.get("induced_vert_break"), current.get("horz_break"),
+                current.get("release_height"), current.get("release_side"),
+                current.get("extension_ft"), current.get("total_spin"),
+                current.get("tilt_string"), current.get("spin_axis"),
+                current.get("efficiency"), current.get("active_spin"),
+                current.get("gyro"), current.get("pitcher_hand"),
+                stuff_plus, stuff_plus_raw, current.get("notes"),
+                pitch_id, user_id,
+            ),
+        )
+        conn.commit()
+
+    return SavedPitchResponse(
+        id=pitch_id, pitch_type=current["pitch_type"],
+        pitch_speed=current.get("pitch_speed"),
+        induced_vert_break=current.get("induced_vert_break"),
+        horz_break=current.get("horz_break"),
+        release_height=current.get("release_height"),
+        release_side=current.get("release_side"),
+        extension_ft=current.get("extension_ft"),
+        total_spin=current.get("total_spin"),
+        tilt_string=current.get("tilt_string"),
+        spin_axis=current.get("spin_axis"),
+        efficiency=current.get("efficiency"),
+        active_spin=current.get("active_spin"),
+        gyro=current.get("gyro"),
+        pitcher_hand=current.get("pitcher_hand") or "R",
+        stuff_plus=stuff_plus, stuff_plus_raw=stuff_plus_raw,
+        notes=current.get("notes"),
+        created_at=current["created_at"],
+        source=current.get("source") or "manual",
+    )
 
 
 @app.delete("/pitches/{pitch_id}", status_code=204)

@@ -227,7 +227,7 @@ struct ResultView: View {
             if let result = viewModel.stuffPlusResult {
                 ShareSheet(items: [
                     """
-                    Developing Baseball - Stuff+ Analysis
+                    Arsenal IQ - Stuff+ Analysis
                     
                     \(viewModel.pitchData.pitchType.displayName) • \(viewModel.pitchData.pitcherHand == .right ? "RHP" : "LHP")
                     

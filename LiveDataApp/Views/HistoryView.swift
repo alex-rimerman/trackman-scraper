@@ -7,15 +7,32 @@ struct HistoryView: View {
     @State private var isLoading = false
     @State private var errorMessage: String?
     @State private var selectedPitch: SavedPitch?
-    @State private var selectedFilter: String?
-    @State private var showFilterMenu = false
     @State private var showProfilesSheet = false
     @State private var showDeleteAccountConfirmation = false
     @State private var deleteAccountError: String?
     
+    // MARK: - Filters
+    @State private var showFilters = false
+    @State private var filterPitchType: String?
+    @State private var filterSource: String?
+    @State private var filterDateFrom: Date?
+    @State private var filterDateTo: Date?
+    @State private var filterStuffMin: String = ""
+    @State private var filterStuffMax: String = ""
+    
+    private var activeFilterCount: Int {
+        var c = 0
+        if filterPitchType != nil { c += 1 }
+        if filterSource != nil { c += 1 }
+        if filterDateFrom != nil { c += 1 }
+        if filterDateTo != nil { c += 1 }
+        if Double(filterStuffMin) != nil { c += 1 }
+        if Double(filterStuffMax) != nil { c += 1 }
+        return c
+    }
+    
     var body: some View {
         ZStack {
-            // Background
             LinearGradient(
                 gradient: Gradient(colors: [
                     Color(red: 0.12, green: 0.23, blue: 0.54),
@@ -27,93 +44,11 @@ struct HistoryView: View {
             .ignoresSafeArea()
             
             VStack(spacing: 0) {
-                // Header
-                HStack {
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text("Pitch History")
-                            .font(.system(size: 28, weight: .bold, design: .rounded))
-                            .foregroundColor(.white)
-                        HStack(spacing: 8) {
-                            Text("\(pitches.count) pitch\(pitches.count == 1 ? "" : "es") saved")
-                                .font(.system(size: 14, weight: .medium))
-                                .foregroundColor(Color(red: 0.53, green: 0.81, blue: 0.92))
-                            
-                            if let filter = selectedFilter {
-                                Text("• \(pitchTypeDisplayName(filter))")
-                                    .font(.system(size: 14, weight: .medium))
-                                    .foregroundColor(.orange)
-                            }
-                        }
-                    }
-                    
-                    Spacer()
-                    
-                    HStack(spacing: 12) {
-                        // Filter button
-                        Menu {
-                            Button(action: {
-                                selectedFilter = nil
-                                Task { await loadPitches() }
-                            }) {
-                                Label(selectedFilter == nil ? "✓ All" : "All", systemImage: "line.3.horizontal.decrease.circle")
-                            }
-                            
-                            Divider()
-                            
-                            ForEach(["FF", "SI", "FC", "SL", "CU", "CH", "ST", "FS"], id: \.self) { type in
-                                Button(action: {
-                                    selectedFilter = type
-                                    Task { await loadPitches() }
-                                }) {
-                                    Label(selectedFilter == type ? "✓ \(pitchTypeDisplayName(type))" : pitchTypeDisplayName(type), systemImage: "baseball")
-                                }
-                            }
-                        } label: {
-                            Image(systemName: "line.3.horizontal.decrease.circle")
-                                .font(.system(size: 20))
-                                .foregroundColor(selectedFilter == nil ? .white.opacity(0.7) : .orange)
-                                .padding(8)
-                                .background(Color.white.opacity(0.1))
-                                .cornerRadius(10)
-                        }
-                        
-                        // User menu
-                        Menu {
-                            Text(authViewModel.userEmail)
-                            if AuthService.accountType == "team" {
-                                Button(action: { showProfilesSheet = true }) {
-                                    Label("Profiles", systemImage: "person.3.fill")
-                                }
-                            }
-                            Divider()
-                            Button(role: .destructive) {
-                                showDeleteAccountConfirmation = true
-                            } label: {
-                                Label("Delete Account", systemImage: "trash")
-                            }
-                            Button(role: .destructive) {
-                                authViewModel.logout()
-                            } label: {
-                                Label("Log Out", systemImage: "rectangle.portrait.and.arrow.right")
-                            }
-                        } label: {
-                            HStack(spacing: 6) {
-                                Image(systemName: "person.circle.fill")
-                                    .font(.system(size: 20))
-                                Text((AuthService.currentProfileName ?? authViewModel.userName).components(separatedBy: " ").first ?? "")
-                                    .font(.system(size: 14, weight: .medium))
-                            }
-                            .foregroundColor(.white.opacity(0.8))
-                            .padding(.horizontal, 12)
-                            .padding(.vertical, 6)
-                            .background(Color.white.opacity(0.1))
-                            .cornerRadius(12)
-                        }
-                    }
+                header
+                
+                if showFilters {
+                    filterPanel
                 }
-                .padding(.horizontal, 20)
-                .padding(.top, 12)
-                .padding(.bottom, 16)
                 
                 if isLoading && pitches.isEmpty {
                     Spacer()
@@ -131,19 +66,24 @@ struct HistoryView: View {
                         Image(systemName: "baseball")
                             .font(.system(size: 48))
                             .foregroundColor(.white.opacity(0.3))
-                        Text("No pitches yet")
+                        Text(activeFilterCount > 0 ? "No pitches match filters" : "No pitches yet")
                             .font(.headline)
                             .foregroundColor(.white.opacity(0.5))
-                        Text("Go to the Analyzer tab to scan a pitch\nor upload a Trackman PDF report")
-                            .font(.subheadline)
-                            .foregroundColor(.white.opacity(0.3))
-                            .multilineTextAlignment(.center)
+                        if activeFilterCount > 0 {
+                            Button("Clear Filters") { clearFilters() }
+                                .font(.subheadline.weight(.medium))
+                                .foregroundColor(Color(red: 0.53, green: 0.81, blue: 0.92))
+                        } else {
+                            Text("Go to the Analyzer tab to scan a pitch\nor upload a Trackman PDF report")
+                                .font(.subheadline)
+                                .foregroundColor(.white.opacity(0.3))
+                                .multilineTextAlignment(.center)
+                        }
                     }
                     Spacer()
                 } else {
                     List {
-                        // Trend summary if we have data
-                        if !pitches.isEmpty && selectedFilter == nil {
+                        if !pitches.isEmpty && activeFilterCount == 0 {
                             trendSummarySection
                                 .listRowBackground(Color.clear)
                                 .listRowSeparatorTint(Color.clear)
@@ -192,7 +132,11 @@ struct HistoryView: View {
             await loadPitches()
         }
         .sheet(item: $selectedPitch) { pitch in
-            PitchDetailView(pitch: pitch)
+            PitchDetailView(pitch: pitch) { updated in
+                if let idx = pitches.firstIndex(where: { $0.id == updated.id }) {
+                    pitches[idx] = updated
+                }
+            }
         }
         .sheet(isPresented: $showProfilesSheet) {
             ProfilesView(authViewModel: authViewModel)
@@ -223,20 +167,245 @@ struct HistoryView: View {
         }
     }
     
+    // MARK: - Header
+    
+    private var header: some View {
+        HStack {
+            VStack(alignment: .leading, spacing: 2) {
+                Text("Pitch History")
+                    .font(.system(size: 28, weight: .bold, design: .rounded))
+                    .foregroundColor(.white)
+                HStack(spacing: 8) {
+                    Text("\(pitches.count) pitch\(pitches.count == 1 ? "" : "es") saved")
+                        .font(.system(size: 14, weight: .medium))
+                        .foregroundColor(Color(red: 0.53, green: 0.81, blue: 0.92))
+                    
+                    if activeFilterCount > 0 {
+                        Text("• \(activeFilterCount) filter\(activeFilterCount == 1 ? "" : "s")")
+                            .font(.system(size: 14, weight: .medium))
+                            .foregroundColor(.orange)
+                    }
+                }
+            }
+            
+            Spacer()
+            
+            HStack(spacing: 12) {
+                Button {
+                    withAnimation(.easeInOut(duration: 0.25)) {
+                        showFilters.toggle()
+                    }
+                } label: {
+                    ZStack(alignment: .topTrailing) {
+                        Image(systemName: "line.3.horizontal.decrease.circle")
+                            .font(.system(size: 20))
+                            .foregroundColor(activeFilterCount > 0 ? .orange : .white.opacity(0.7))
+                            .padding(8)
+                            .background(Color.white.opacity(0.1))
+                            .cornerRadius(10)
+                        
+                        if activeFilterCount > 0 {
+                            Text("\(activeFilterCount)")
+                                .font(.system(size: 9, weight: .bold))
+                                .foregroundColor(.white)
+                                .frame(width: 16, height: 16)
+                                .background(.orange)
+                                .clipShape(Circle())
+                                .offset(x: 4, y: -4)
+                        }
+                    }
+                }
+                
+                Menu {
+                    Text(authViewModel.userEmail)
+                    if AuthService.accountType == "team" {
+                        Button(action: { showProfilesSheet = true }) {
+                            Label("Profiles", systemImage: "person.3.fill")
+                        }
+                    }
+                    Divider()
+                    Button(role: .destructive) {
+                        showDeleteAccountConfirmation = true
+                    } label: {
+                        Label("Delete Account", systemImage: "trash")
+                    }
+                    Button(role: .destructive) {
+                        authViewModel.logout()
+                    } label: {
+                        Label("Log Out", systemImage: "rectangle.portrait.and.arrow.right")
+                    }
+                } label: {
+                    HStack(spacing: 6) {
+                        Image(systemName: "person.circle.fill")
+                            .font(.system(size: 20))
+                        Text((AuthService.currentProfileName ?? authViewModel.userName).components(separatedBy: " ").first ?? "")
+                            .font(.system(size: 14, weight: .medium))
+                    }
+                    .foregroundColor(.white.opacity(0.8))
+                    .padding(.horizontal, 12)
+                    .padding(.vertical, 6)
+                    .background(Color.white.opacity(0.1))
+                    .cornerRadius(12)
+                }
+            }
+        }
+        .padding(.horizontal, 20)
+        .padding(.top, 12)
+        .padding(.bottom, 16)
+    }
+    
+    // MARK: - Filter Panel
+    
+    private var filterPanel: some View {
+        VStack(spacing: 12) {
+            // Pitch type row
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(spacing: 8) {
+                    filterChip("All Types", isActive: filterPitchType == nil) {
+                        filterPitchType = nil
+                        Task { await loadPitches() }
+                    }
+                    ForEach(["FF", "SI", "FC", "SL", "CU", "CH", "ST", "FS"], id: \.self) { type in
+                        filterChip(pitchTypeDisplayName(type), isActive: filterPitchType == type) {
+                            filterPitchType = (filterPitchType == type) ? nil : type
+                            Task { await loadPitches() }
+                        }
+                    }
+                }
+                .padding(.horizontal, 16)
+            }
+            
+            // Source row
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(spacing: 8) {
+                    filterChip("All Sources", isActive: filterSource == nil) {
+                        filterSource = nil
+                        Task { await loadPitches() }
+                    }
+                    ForEach([("manual", "Manual"), ("camera", "Camera"), ("trackman_pdf", "TM PDF"), ("trackman_csv", "TM CSV"), ("hawkeye_csv", "HE CSV")], id: \.0) { (value, label) in
+                        filterChip(label, isActive: filterSource == value) {
+                            filterSource = (filterSource == value) ? nil : value
+                            Task { await loadPitches() }
+                        }
+                    }
+                }
+                .padding(.horizontal, 16)
+            }
+            
+            // Date range + Stuff+ range
+            HStack(spacing: 12) {
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("FROM")
+                        .font(.system(size: 9, weight: .bold))
+                        .foregroundColor(.white.opacity(0.4))
+                    DatePicker("", selection: Binding(
+                        get: { filterDateFrom ?? Calendar.current.date(byAdding: .year, value: -1, to: Date())! },
+                        set: { filterDateFrom = $0; Task { await loadPitches() } }
+                    ), displayedComponents: .date)
+                    .labelsHidden()
+                    .colorScheme(.dark)
+                    .scaleEffect(0.85, anchor: .leading)
+                }
+                
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("TO")
+                        .font(.system(size: 9, weight: .bold))
+                        .foregroundColor(.white.opacity(0.4))
+                    DatePicker("", selection: Binding(
+                        get: { filterDateTo ?? Date() },
+                        set: { filterDateTo = $0; Task { await loadPitches() } }
+                    ), displayedComponents: .date)
+                    .labelsHidden()
+                    .colorScheme(.dark)
+                    .scaleEffect(0.85, anchor: .leading)
+                }
+                
+                Spacer()
+                
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("S+ MIN")
+                        .font(.system(size: 9, weight: .bold))
+                        .foregroundColor(.white.opacity(0.4))
+                    TextField("—", text: $filterStuffMin)
+                        .keyboardType(.numberPad)
+                        .font(.system(size: 14, weight: .medium, design: .rounded))
+                        .foregroundColor(.white)
+                        .frame(width: 44)
+                        .padding(6)
+                        .background(Color.white.opacity(0.08))
+                        .cornerRadius(6)
+                        .onChange(of: filterStuffMin) { _, _ in Task { await loadPitches() } }
+                }
+                
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("S+ MAX")
+                        .font(.system(size: 9, weight: .bold))
+                        .foregroundColor(.white.opacity(0.4))
+                    TextField("—", text: $filterStuffMax)
+                        .keyboardType(.numberPad)
+                        .font(.system(size: 14, weight: .medium, design: .rounded))
+                        .foregroundColor(.white)
+                        .frame(width: 44)
+                        .padding(6)
+                        .background(Color.white.opacity(0.08))
+                        .cornerRadius(6)
+                        .onChange(of: filterStuffMax) { _, _ in Task { await loadPitches() } }
+                }
+            }
+            .padding(.horizontal, 16)
+            
+            // Clear all
+            if activeFilterCount > 0 {
+                Button {
+                    clearFilters()
+                } label: {
+                    Text("Clear All Filters")
+                        .font(.system(size: 13, weight: .medium))
+                        .foregroundColor(.orange)
+                }
+            }
+        }
+        .padding(.vertical, 12)
+        .background(Color.white.opacity(0.04))
+    }
+    
+    private func filterChip(_ title: String, isActive: Bool, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            Text(title)
+                .font(.system(size: 12, weight: .semibold))
+                .foregroundColor(isActive ? .white : .white.opacity(0.6))
+                .padding(.horizontal, 12)
+                .padding(.vertical, 6)
+                .background(isActive ? Color(red: 0.53, green: 0.81, blue: 0.92).opacity(0.3) : Color.white.opacity(0.06))
+                .cornerRadius(16)
+                .overlay(
+                    RoundedRectangle(cornerRadius: 16)
+                        .stroke(isActive ? Color(red: 0.53, green: 0.81, blue: 0.92).opacity(0.6) : Color.clear, lineWidth: 1)
+                )
+        }
+    }
+    
+    private func clearFilters() {
+        filterPitchType = nil
+        filterSource = nil
+        filterDateFrom = nil
+        filterDateTo = nil
+        filterStuffMin = ""
+        filterStuffMax = ""
+        Task { await loadPitches() }
+    }
+    
     // MARK: - Pitch Row
     
     private func pitchRow(_ pitch: SavedPitch) -> some View {
         HStack(spacing: 14) {
-            // Stuff+ circle
             ZStack {
                 Circle()
                     .fill(stuffPlusColor(for: pitch.stuffPlus ?? 0).opacity(0.2))
                     .frame(width: 54, height: 54)
-                
                 Circle()
                     .stroke(stuffPlusColor(for: pitch.stuffPlus ?? 0), lineWidth: 2.5)
                     .frame(width: 54, height: 54)
-                
                 VStack(spacing: 0) {
                     Text(pitch.stuffPlus != nil ? "\(Int(pitch.stuffPlus!))" : "—")
                         .font(.system(size: 18, weight: .bold, design: .rounded))
@@ -247,11 +416,20 @@ struct HistoryView: View {
                 }
             }
             
-            // Details
             VStack(alignment: .leading, spacing: 4) {
-                Text(pitch.pitchTypeDisplay)
-                    .font(.system(size: 16, weight: .semibold))
-                    .foregroundColor(.white)
+                HStack(spacing: 6) {
+                    Text(pitch.pitchTypeDisplay)
+                        .font(.system(size: 16, weight: .semibold))
+                        .foregroundColor(.white)
+                    
+                    Text(pitch.sourceDisplay)
+                        .font(.system(size: 9, weight: .bold))
+                        .foregroundColor(sourceColor(pitch.source))
+                        .padding(.horizontal, 5)
+                        .padding(.vertical, 2)
+                        .background(sourceColor(pitch.source).opacity(0.15))
+                        .cornerRadius(4)
+                }
                 
                 HStack(spacing: 12) {
                     if let speed = pitch.pitchSpeed {
@@ -272,7 +450,6 @@ struct HistoryView: View {
             
             Spacer()
             
-            // Hand indicator
             Text(pitch.pitcherHand == "L" ? "LHP" : "RHP")
                 .font(.system(size: 10, weight: .semibold))
                 .foregroundColor(.white.opacity(0.4))
@@ -282,6 +459,16 @@ struct HistoryView: View {
                 .cornerRadius(6)
         }
         .padding(.vertical, 6)
+    }
+    
+    private func sourceColor(_ source: String?) -> Color {
+        switch source ?? "manual" {
+        case "trackman_csv": return Color(red: 0.35, green: 0.75, blue: 0.45)
+        case "hawkeye_csv": return Color(red: 0.85, green: 0.55, blue: 0.20)
+        case "trackman_pdf": return Color(red: 0.53, green: 0.81, blue: 0.92)
+        case "camera": return Color(red: 0.53, green: 0.81, blue: 0.92)
+        default: return .white.opacity(0.4)
+        }
     }
     
     private func miniStat(_ label: String, value: String) -> some View {
@@ -300,9 +487,21 @@ struct HistoryView: View {
     private func loadPitches() async {
         isLoading = true
         errorMessage = nil
+        
+        let isoFmt = ISO8601DateFormatter()
+        isoFmt.formatOptions = [.withInternetDateTime]
+        
         do {
             let profileId = AuthService.currentProfileId ?? AuthService.defaultProfileId
-            pitches = try await AuthService.getPitches(pitchType: selectedFilter, profileId: profileId)
+            pitches = try await AuthService.getPitches(
+                pitchType: filterPitchType,
+                profileId: profileId,
+                dateFrom: filterDateFrom.map { isoFmt.string(from: $0) },
+                dateTo: filterDateTo.map { isoFmt.string(from: Calendar.current.date(byAdding: .day, value: 1, to: $0)!) },
+                stuffMin: Double(filterStuffMin),
+                stuffMax: Double(filterStuffMax),
+                source: filterSource
+            )
         } catch {
             if case AuthError.unauthorized = error {
                 authViewModel.logout()
@@ -351,11 +550,10 @@ struct HistoryView: View {
                         statCard("Peak FB Velo", value: peakFbVelo.map { String(format: "%.1f", $0) } ?? "—")
                     }
                     
-                    // Mini trend chart
                     HStack(alignment: .bottom, spacing: 4) {
                         ForEach(recentPitches.indices.reversed(), id: \.self) { index in
                             if let stuffPlus = recentPitches[index].stuffPlus {
-                                let normalizedHeight = CGFloat((stuffPlus - 60) / 80) // 60-140 range
+                                let normalizedHeight = CGFloat((stuffPlus - 60) / 80)
                                 Rectangle()
                                     .fill(stuffPlusColor(for: stuffPlus))
                                     .frame(width: 24, height: max(20, normalizedHeight * 60))
@@ -395,7 +593,6 @@ struct HistoryView: View {
     
     private func deletePitches(at offsets: IndexSet) {
         let toDelete = offsets.map { pitches[$0] }
-        // Optimistic removal
         pitches.remove(atOffsets: offsets)
         
         Task {
@@ -403,7 +600,6 @@ struct HistoryView: View {
                 do {
                     try await AuthService.deletePitch(id: pitch.id)
                 } catch {
-                    // Re-load on failure
                     errorMessage = "Failed to delete: \(error.localizedDescription)"
                     await loadPitches()
                     break

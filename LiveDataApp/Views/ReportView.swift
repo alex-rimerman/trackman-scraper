@@ -17,6 +17,13 @@ struct ReportView: View {
     @State private var showProfilesSheet = false
     @State private var showDeleteAccountConfirmation = false
     @State private var deleteAccountError: String?
+    @State private var showFilterPanel = false
+    @State private var filterPitchType: String?
+    @State private var filterSource: String?
+    @State private var filterDateFrom: Date?
+    @State private var filterDateTo: Date?
+    @State private var showExportShare = false
+    @State private var exportCSVURL: URL?
     
     var body: some View {
         ZStack {
@@ -47,6 +54,11 @@ struct ReportView: View {
         .sheet(isPresented: $showShareSheet) {
             if let image = shareImage {
                 ShareSheet(items: [image])
+            }
+        }
+        .sheet(isPresented: $showExportShare) {
+            if let url = exportCSVURL {
+                ShareSheet(items: [url])
             }
         }
         .sheet(isPresented: $showProfilesSheet) {
@@ -194,6 +206,10 @@ struct ReportView: View {
         VStack(spacing: 0) {
             selectionToolbar
             
+            if showFilterPanel {
+                reportFilterPanel
+            }
+            
             List {
                 ForEach(groupedPitchTypes, id: \.key) { group in
                     Section {
@@ -222,6 +238,21 @@ struct ReportView: View {
             
             Spacer()
             
+            Button {
+                withAnimation(.easeInOut(duration: 0.2)) { showFilterPanel.toggle() }
+            } label: {
+                HStack(spacing: 4) {
+                    Image(systemName: "line.3.horizontal.decrease")
+                        .font(.system(size: 12))
+                    Text("Filter")
+                        .font(.system(size: 13, weight: .medium))
+                }
+                .foregroundColor(hasActiveReportFilters ? .orange : Color(red: 0.53, green: 0.81, blue: 0.92))
+            }
+            
+            Text("|")
+                .foregroundColor(.white.opacity(0.2))
+            
             Button("Select All") { selectAll() }
                 .font(.system(size: 14, weight: .medium))
                 .foregroundColor(Color(red: 0.53, green: 0.81, blue: 0.92))
@@ -236,6 +267,104 @@ struct ReportView: View {
         .padding(.horizontal, 20)
         .padding(.vertical, 10)
         .background(Color.white.opacity(0.03))
+    }
+    
+    private var hasActiveReportFilters: Bool {
+        filterPitchType != nil || filterSource != nil || filterDateFrom != nil || filterDateTo != nil
+    }
+    
+    private var reportFilterPanel: some View {
+        VStack(spacing: 10) {
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(spacing: 8) {
+                    reportFilterChip("All Types", isActive: filterPitchType == nil) {
+                        filterPitchType = nil
+                        Task { await loadPitches() }
+                    }
+                    ForEach(["FF", "SI", "FC", "SL", "CU", "CH", "ST", "FS"], id: \.self) { type in
+                        reportFilterChip(pitchTypeDisplayName(type), isActive: filterPitchType == type) {
+                            filterPitchType = (filterPitchType == type) ? nil : type
+                            Task { await loadPitches() }
+                        }
+                    }
+                }
+                .padding(.horizontal, 16)
+            }
+            
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(spacing: 8) {
+                    reportFilterChip("All Sources", isActive: filterSource == nil) {
+                        filterSource = nil
+                        Task { await loadPitches() }
+                    }
+                    ForEach([("manual", "Manual"), ("camera", "Camera"), ("trackman_pdf", "TM PDF"), ("trackman_csv", "TM CSV"), ("hawkeye_csv", "HE CSV")], id: \.0) { (val, label) in
+                        reportFilterChip(label, isActive: filterSource == val) {
+                            filterSource = (filterSource == val) ? nil : val
+                            Task { await loadPitches() }
+                        }
+                    }
+                }
+                .padding(.horizontal, 16)
+            }
+            
+            HStack(spacing: 12) {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("FROM")
+                        .font(.system(size: 9, weight: .bold))
+                        .foregroundColor(.white.opacity(0.4))
+                    DatePicker("", selection: Binding(
+                        get: { filterDateFrom ?? Calendar.current.date(byAdding: .year, value: -1, to: Date())! },
+                        set: { filterDateFrom = $0; Task { await loadPitches() } }
+                    ), displayedComponents: .date)
+                    .labelsHidden()
+                    .colorScheme(.dark)
+                    .scaleEffect(0.85, anchor: .leading)
+                }
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("TO")
+                        .font(.system(size: 9, weight: .bold))
+                        .foregroundColor(.white.opacity(0.4))
+                    DatePicker("", selection: Binding(
+                        get: { filterDateTo ?? Date() },
+                        set: { filterDateTo = $0; Task { await loadPitches() } }
+                    ), displayedComponents: .date)
+                    .labelsHidden()
+                    .colorScheme(.dark)
+                    .scaleEffect(0.85, anchor: .leading)
+                }
+                Spacer()
+                if hasActiveReportFilters {
+                    Button("Clear") {
+                        filterPitchType = nil
+                        filterSource = nil
+                        filterDateFrom = nil
+                        filterDateTo = nil
+                        Task { await loadPitches() }
+                    }
+                    .font(.system(size: 12, weight: .medium))
+                    .foregroundColor(.orange)
+                }
+            }
+            .padding(.horizontal, 16)
+        }
+        .padding(.vertical, 10)
+        .background(Color.white.opacity(0.04))
+    }
+    
+    private func reportFilterChip(_ title: String, isActive: Bool, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            Text(title)
+                .font(.system(size: 12, weight: .semibold))
+                .foregroundColor(isActive ? .white : .white.opacity(0.6))
+                .padding(.horizontal, 12)
+                .padding(.vertical, 6)
+                .background(isActive ? Color(red: 0.53, green: 0.81, blue: 0.92).opacity(0.3) : Color.white.opacity(0.06))
+                .cornerRadius(16)
+                .overlay(
+                    RoundedRectangle(cornerRadius: 16)
+                        .stroke(isActive ? Color(red: 0.53, green: 0.81, blue: 0.92).opacity(0.6) : Color.clear, lineWidth: 1)
+                )
+        }
     }
     
     private func selectionRow(_ pitch: SavedPitch) -> some View {
@@ -395,17 +524,14 @@ struct ReportView: View {
                     .foregroundStyle(.gray.opacity(0.3))
                     .lineStyle(StrokeStyle(lineWidth: 0.5))
                 
-                ForEach(reportSummaryRows, id: \.pitchType) { row in
-                    PointMark(
-                        x: .value("HB", row.hb),
-                        y: .value("IVB", row.ivb)
-                    )
-                    .foregroundStyle(pitchColor(for: row.pitchType))
-                    .symbolSize(200)
-                    .annotation(position: .top, spacing: 4) {
-                        Text(row.pitchType)
-                            .font(.system(size: 9, weight: .bold))
-                            .foregroundColor(pitchColor(for: row.pitchType))
+                ForEach(selectedPitches) { pitch in
+                    if let hb = pitch.horzBreak, let ivb = pitch.inducedVertBreak {
+                        PointMark(
+                            x: .value("HB", hb),
+                            y: .value("IVB", ivb)
+                        )
+                        .foregroundStyle(pitchColor(for: pitch.pitchType))
+                        .symbolSize(25)
                     }
                 }
             }
@@ -445,17 +571,14 @@ struct ReportView: View {
                 .foregroundColor(.white.opacity(0.7))
             
             Chart {
-                ForEach(reportSummaryRows, id: \.pitchType) { row in
-                    PointMark(
-                        x: .value("Horiz", row.horizRel),
-                        y: .value("Vert", row.vertRel)
-                    )
-                    .foregroundStyle(pitchColor(for: row.pitchType))
-                    .symbolSize(200)
-                    .annotation(position: .top, spacing: 4) {
-                        Text(row.pitchType)
-                            .font(.system(size: 9, weight: .bold))
-                            .foregroundColor(pitchColor(for: row.pitchType))
+                ForEach(selectedPitches) { pitch in
+                    if let relSide = pitch.releaseSide, let relHeight = pitch.releaseHeight {
+                        PointMark(
+                            x: .value("Horiz", relSide),
+                            y: .value("Vert", relHeight)
+                        )
+                        .foregroundStyle(pitchColor(for: pitch.pitchType))
+                        .symbolSize(25)
                     }
                 }
             }
@@ -508,12 +631,13 @@ struct ReportView: View {
     private var tableHeaderRow: some View {
         HStack(spacing: 0) {
             tableHeaderCell("Pitch", width: .flexible, alignment: .leading)
-            tableHeaderCell("Velo", width: .fixed(52))
-            tableHeaderCell("IVB", width: .fixed(48))
-            tableHeaderCell("HB", width: .fixed(48))
-            tableHeaderCell("Spin", width: .fixed(52))
-            tableHeaderCell("Ext", width: .fixed(42))
-            tableHeaderCell("S+", width: .fixed(42))
+            tableHeaderCell("Avg", width: .fixed(44))
+            tableHeaderCell("Max", width: .fixed(44))
+            tableHeaderCell("IVB", width: .fixed(44))
+            tableHeaderCell("HB", width: .fixed(44))
+            tableHeaderCell("Spin", width: .fixed(48))
+            tableHeaderCell("Ext", width: .fixed(40))
+            tableHeaderCell("S+", width: .fixed(38))
         }
         .padding(.vertical, 10)
         .padding(.horizontal, 10)
@@ -552,17 +676,18 @@ struct ReportView: View {
             }
             .frame(maxWidth: .infinity, alignment: .leading)
             
-            tableCellText(String(format: "%.1f", row.velo), width: 52)
-            tableCellText(String(format: "%.1f", row.ivb), width: 48)
-            tableCellText(String(format: "%.1f", row.hb), width: 48)
-            tableCellText(String(format: "%.0f", row.spin), width: 52)
-            tableCellText(String(format: "%.1f", row.ext), width: 42)
+            tableCellText(String(format: "%.1f", row.velo), width: 44)
+            tableCellText(String(format: "%.1f", row.maxVelo), width: 44)
+            tableCellText(String(format: "%.1f", row.ivb), width: 44)
+            tableCellText(String(format: "%.1f", row.hb), width: 44)
+            tableCellText(String(format: "%.0f", row.spin), width: 48)
+            tableCellText(String(format: "%.1f", row.ext), width: 40)
             
             // Stuff+ with color
             Text(String(format: "%.0f", row.stuffPlus))
                 .font(.system(size: 12, weight: .bold, design: .rounded))
                 .foregroundColor(stuffPlusColor(for: row.stuffPlus))
-                .frame(width: 42)
+                .frame(width: 38)
         }
         .padding(.vertical, 10)
         .padding(.horizontal, 10)
@@ -600,7 +725,7 @@ struct ReportView: View {
             Button(action: exportReport) {
                 HStack {
                     Image(systemName: "square.and.arrow.up")
-                    Text("Share Report")
+                    Text("Share Report Image")
                         .fontWeight(.semibold)
                 }
                 .foregroundColor(.white)
@@ -613,6 +738,23 @@ struct ReportView: View {
                     )
                 )
                 .cornerRadius(14)
+            }
+            
+            Button(action: exportCSV) {
+                HStack {
+                    Image(systemName: "tablecells")
+                    Text("Export CSV")
+                        .fontWeight(.semibold)
+                }
+                .foregroundColor(Color(red: 0.35, green: 0.75, blue: 0.45))
+                .frame(maxWidth: .infinity)
+                .padding(.vertical, 14)
+                .background(Color(red: 0.35, green: 0.75, blue: 0.45).opacity(0.12))
+                .cornerRadius(14)
+                .overlay(
+                    RoundedRectangle(cornerRadius: 14)
+                        .stroke(Color(red: 0.35, green: 0.75, blue: 0.45).opacity(0.4), lineWidth: 1)
+                )
             }
             
             Button(action: { showReport = false }) {
@@ -655,8 +797,10 @@ struct ReportView: View {
         
         return typeOrder.compactMap { type -> ReportSummaryRow? in
             guard let pitches = grouped[type], !pitches.isEmpty else { return nil }
+            let velocities = pitches.compactMap(\.pitchSpeed)
             
-            let avgVelo = average(pitches.compactMap(\.pitchSpeed))
+            let avgVelo = average(velocities)
+            let maxVelo = velocities.max() ?? avgVelo
             let avgIVB = average(pitches.compactMap(\.inducedVertBreak))
             let avgHB = average(pitches.compactMap(\.horzBreak))
             let avgSpin = average(pitches.compactMap(\.totalSpin))
@@ -668,6 +812,7 @@ struct ReportView: View {
             return ReportSummaryRow(
                 pitchType: type,
                 velo: avgVelo,
+                maxVelo: maxVelo,
                 ivb: avgIVB,
                 hb: avgHB,
                 spin: avgSpin,
@@ -682,14 +827,14 @@ struct ReportView: View {
     // MARK: - Chart Ranges
     
     private var movementXRange: ClosedRange<Double> {
-        let hbs = reportSummaryRows.map(\.hb)
+        let hbs = selectedPitches.compactMap(\.horzBreak)
         let minVal = (hbs.min() ?? -25) - 5
         let maxVal = (hbs.max() ?? 25) + 5
         return min(minVal, -25)...max(maxVal, 25)
     }
     
     private var movementYRange: ClosedRange<Double> {
-        let ivbs = reportSummaryRows.map(\.ivb)
+        let ivbs = selectedPitches.compactMap(\.inducedVertBreak)
         let minVal = (ivbs.min() ?? -25) - 5
         let maxVal = (ivbs.max() ?? 25) + 5
         return min(minVal, -25)...max(maxVal, 25)
@@ -731,9 +876,22 @@ struct ReportView: View {
     private func loadPitches() async {
         isLoading = true
         errorMessage = nil
+        
+        let isoFmt = ISO8601DateFormatter()
+        isoFmt.formatOptions = [.withInternetDateTime]
+        
         do {
             let profileId = AuthService.currentProfileId ?? AuthService.defaultProfileId
-            allPitches = try await AuthService.getPitches(limit: 200, profileId: profileId)
+            allPitches = try await AuthService.getPitches(
+                limit: 500,
+                profileId: profileId,
+                dateFrom: filterDateFrom.map { isoFmt.string(from: $0) },
+                dateTo: filterDateTo.map { isoFmt.string(from: Calendar.current.date(byAdding: .day, value: 1, to: $0)!) },
+                source: filterSource
+            )
+            if let pt = filterPitchType {
+                allPitches = allPitches.filter { $0.pitchType == pt }
+            }
         } catch {
             if case AuthError.unauthorized = error {
                 authViewModel.logout()
@@ -747,8 +905,11 @@ struct ReportView: View {
     private func exportReport() {
         let reportView = ReportExportView(
             playerName: AuthService.currentProfileName ?? authViewModel.userName,
+            pitches: selectedPitches,
             rows: reportSummaryRows,
-            dateString: formattedToday
+            dateString: formattedToday,
+            pitchCount: selectedPitchIDs.count,
+            pitchTypeCount: reportSummaryRows.count
         )
         let renderer = ImageRenderer(content: reportView)
         renderer.scale = 3.0
@@ -756,6 +917,37 @@ struct ReportView: View {
             shareImage = image
             showShareSheet = true
         }
+    }
+    
+    private func exportCSV() {
+        let pitches = selectedPitches
+        guard !pitches.isEmpty else { return }
+        let cols = ["Pitch Type", "Velocity", "IVB", "HB", "Spin", "Extension", "Rel Height", "Rel Side", "Spin Axis", "Efficiency", "Hand", "Stuff+", "Source", "Notes", "Date"]
+        var csv = cols.joined(separator: ",") + "\n"
+        for p in pitches {
+            let row: [String] = [
+                p.pitchTypeDisplay,
+                p.pitchSpeed.map { String(format: "%.1f", $0) } ?? "",
+                p.inducedVertBreak.map { String(format: "%.1f", $0) } ?? "",
+                p.horzBreak.map { String(format: "%.1f", $0) } ?? "",
+                p.totalSpin.map { String(format: "%.0f", $0) } ?? "",
+                p.extensionFt.map { String(format: "%.1f", $0) } ?? "",
+                p.releaseHeight.map { String(format: "%.2f", $0) } ?? "",
+                p.releaseSide.map { String(format: "%.2f", $0) } ?? "",
+                p.spinAxis.map { String(format: "%.0f", $0) } ?? "",
+                p.efficiency.map { String(format: "%.1f", $0) } ?? "",
+                p.pitcherHand,
+                p.stuffPlus.map { String(format: "%.1f", $0) } ?? "",
+                p.sourceDisplay,
+                (p.notes ?? "").replacingOccurrences(of: ",", with: ";"),
+                p.formattedDate,
+            ]
+            csv += row.joined(separator: ",") + "\n"
+        }
+        let tmpURL = FileManager.default.temporaryDirectory.appendingPathComponent("pitch_export.csv")
+        try? csv.write(to: tmpURL, atomically: true, encoding: .utf8)
+        exportCSVURL = tmpURL
+        showExportShare = true
     }
     
     private var formattedToday: String {
@@ -814,6 +1006,7 @@ private enum TableColumnWidth {
 struct ReportSummaryRow {
     let pitchType: String
     let velo: Double
+    let maxVelo: Double
     let ivb: Double
     let hb: Double
     let spin: Double
@@ -827,8 +1020,11 @@ struct ReportSummaryRow {
 
 struct ReportExportView: View {
     let playerName: String
+    let pitches: [SavedPitch]
     let rows: [ReportSummaryRow]
     let dateString: String
+    let pitchCount: Int
+    let pitchTypeCount: Int
     
     var body: some View {
         VStack(spacing: 16) {
@@ -862,6 +1058,9 @@ struct ReportExportView: View {
             Text("Pitching Summary")
                 .font(.system(size: 18, weight: .medium))
                 .foregroundColor(.white)
+            Text("\(pitchCount) pitch\(pitchCount == 1 ? "" : "es") • \(pitchTypeCount) pitch type\(pitchTypeCount == 1 ? "" : "s")")
+                .font(.system(size: 13))
+                .foregroundColor(.white.opacity(0.7))
         }
         .padding(.bottom, 8)
     }
@@ -869,7 +1068,16 @@ struct ReportExportView: View {
     // MARK: - Export Movement Chart
     
     private var exportMovementChart: some View {
-        VStack(spacing: 6) {
+        let hbs = pitches.compactMap(\.horzBreak)
+        let ivbs = pitches.compactMap(\.inducedVertBreak)
+        let xMin = (hbs.min() ?? -25) - 5
+        let xMax = (hbs.max() ?? 25) + 5
+        let yMin = (ivbs.min() ?? -25) - 5
+        let yMax = (ivbs.max() ?? 25) + 5
+        let xDomain = min(xMin, -25)...max(xMax, 25)
+        let yDomain = min(yMin, -25)...max(yMax, 25)
+        
+        return VStack(spacing: 6) {
             Text("Pitch Movement (inches)")
                 .font(.system(size: 12, weight: .semibold))
                 .foregroundColor(.white)
@@ -882,24 +1090,21 @@ struct ReportExportView: View {
                     .foregroundStyle(.gray.opacity(0.4))
                     .lineStyle(StrokeStyle(lineWidth: 0.5))
                 
-                ForEach(rows, id: \.pitchType) { row in
-                    PointMark(
-                        x: .value("HB", row.hb),
-                        y: .value("IVB", row.ivb)
-                    )
-                    .foregroundStyle(exportPitchColor(for: row.pitchType))
-                    .symbolSize(200)
-                    .annotation(position: .top, spacing: 3) {
-                        Text(row.pitchType)
-                            .font(.system(size: 8, weight: .bold))
-                            .foregroundColor(exportPitchColor(for: row.pitchType))
+                ForEach(pitches) { pitch in
+                    if let hb = pitch.horzBreak, let ivb = pitch.inducedVertBreak {
+                        PointMark(
+                            x: .value("HB", hb),
+                            y: .value("IVB", ivb)
+                        )
+                        .foregroundStyle(exportPitchColor(for: pitch.pitchType))
+                        .symbolSize(40)
                     }
                 }
             }
             .chartXAxisLabel("Horizontal Break")
             .chartYAxisLabel("Induced Vert Break")
-            .chartXScale(domain: -25...25)
-            .chartYScale(domain: -25...25)
+            .chartXScale(domain: xDomain)
+            .chartYScale(domain: yDomain)
             .chartXAxis {
                 AxisMarks(position: .bottom) { _ in
                     AxisGridLine(stroke: StrokeStyle(lineWidth: 0.5))
@@ -932,17 +1137,14 @@ struct ReportExportView: View {
                 .foregroundColor(.white)
             
             Chart {
-                ForEach(rows, id: \.pitchType) { row in
-                    PointMark(
-                        x: .value("Horiz", row.horizRel),
-                        y: .value("Vert", row.vertRel)
-                    )
-                    .foregroundStyle(exportPitchColor(for: row.pitchType))
-                    .symbolSize(200)
-                    .annotation(position: .top, spacing: 3) {
-                        Text(row.pitchType)
-                            .font(.system(size: 8, weight: .bold))
-                            .foregroundColor(exportPitchColor(for: row.pitchType))
+                ForEach(pitches) { pitch in
+                    if let relSide = pitch.releaseSide, let relHeight = pitch.releaseHeight {
+                        PointMark(
+                            x: .value("Horiz", relSide),
+                            y: .value("Vert", relHeight)
+                        )
+                        .foregroundStyle(exportPitchColor(for: pitch.pitchType))
+                        .symbolSize(40)
                     }
                 }
             }
@@ -980,11 +1182,12 @@ struct ReportExportView: View {
             // Header
             HStack(spacing: 0) {
                 exportTableHeaderCell("Pitch Type", flex: true, alignment: .leading)
-                exportTableHeaderCell("Avg Velo", width: 65)
-                exportTableHeaderCell("IVB", width: 55)
-                exportTableHeaderCell("HB", width: 55)
-                exportTableHeaderCell("Spin", width: 60)
-                exportTableHeaderCell("Ext", width: 50)
+                exportTableHeaderCell("Avg", width: 50)
+                exportTableHeaderCell("Max", width: 50)
+                exportTableHeaderCell("IVB", width: 50)
+                exportTableHeaderCell("HB", width: 50)
+                exportTableHeaderCell("Spin", width: 55)
+                exportTableHeaderCell("Ext", width: 45)
                 exportTableHeaderCell("Stuff+", width: 60)
             }
             .padding(.vertical, 8)
@@ -1031,23 +1234,27 @@ struct ReportExportView: View {
             Text(String(format: "%.1f", row.velo))
                 .font(.system(size: 12, weight: .medium, design: .rounded))
                 .foregroundColor(.white)
-                .frame(width: 65)
-            Text(String(format: "%.1f", row.ivb))
-                .font(.system(size: 12, weight: .medium, design: .rounded))
-                .foregroundColor(.white)
-                .frame(width: 55)
-            Text(String(format: "%.1f", row.hb))
-                .font(.system(size: 12, weight: .medium, design: .rounded))
-                .foregroundColor(.white)
-                .frame(width: 55)
-            Text(String(format: "%.0f", row.spin))
-                .font(.system(size: 12, weight: .medium, design: .rounded))
-                .foregroundColor(.white)
-                .frame(width: 60)
-            Text(String(format: "%.1f", row.ext))
+                .frame(width: 50)
+            Text(String(format: "%.1f", row.maxVelo))
                 .font(.system(size: 12, weight: .medium, design: .rounded))
                 .foregroundColor(.white)
                 .frame(width: 50)
+            Text(String(format: "%.1f", row.ivb))
+                .font(.system(size: 12, weight: .medium, design: .rounded))
+                .foregroundColor(.white)
+                .frame(width: 50)
+            Text(String(format: "%.1f", row.hb))
+                .font(.system(size: 12, weight: .medium, design: .rounded))
+                .foregroundColor(.white)
+                .frame(width: 50)
+            Text(String(format: "%.0f", row.spin))
+                .font(.system(size: 12, weight: .medium, design: .rounded))
+                .foregroundColor(.white)
+                .frame(width: 55)
+            Text(String(format: "%.1f", row.ext))
+                .font(.system(size: 12, weight: .medium, design: .rounded))
+                .foregroundColor(.white)
+                .frame(width: 45)
             Text(String(format: "%.0f", row.stuffPlus))
                 .font(.system(size: 13, weight: .bold, design: .rounded))
                 .foregroundColor(spColor)

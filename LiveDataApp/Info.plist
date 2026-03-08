@@ -3,13 +3,13 @@
 <plist version="1.0">
 <dict>
     <key>CFBundleDisplayName</key>
-    <string>Stuff+</string>
+    <string>Arsenal IQ</string>
     <key>CFBundleIconName</key>
     <string>AppIcon</string>
     <key>NSCameraUsageDescription</key>
-    <string>Stuff+ needs camera access to photograph the Trackman screen for pitch analysis.</string>
+    <string>Arsenal IQ needs camera access to photograph the Trackman screen for pitch analysis.</string>
     <key>NSPhotoLibraryUsageDescription</key>
-    <string>Stuff+ needs photo library access to select Trackman screen images for pitch analysis.</string>
+    <string>Arsenal IQ needs photo library access to select Trackman screen images for pitch analysis.</string>
     <key>REVENUECAT_API_KEY</key>
     <string>test_SeLpYnaxztzSRTXHAOKDoXpAYLk</string>
     <key>NSAppTransportSecurity</key>

@@ -9,10 +9,21 @@ struct CaptureView: View {
     @State private var showCamera = false
     @State private var showPhotoPicker = false
     @State private var selectedPhotoItem: PhotosPickerItem?
-    @State private var showDocumentPicker = false
     @State private var isImportingPDF = false
     @State private var importProgressMessage: String?
     @State private var importErrorMessage: String?
+    @State private var isImportingCSV = false
+    @State private var csvImportResult: TrackmanCSVImporter.ImportResponse?
+    @State private var showCSVSummary = false
+    @State private var isImportingHawkeye = false
+    
+    enum FilePickerMode { case pdf, trackmanCSV, hawkeyeCSV }
+    @State private var filePickerMode: FilePickerMode?
+    @State private var showFilePicker = false
+    
+    private var isTeamAccount: Bool {
+        AuthService.accountType == "team"
+    }
     
     var body: some View {
         ScrollView {
@@ -83,7 +94,7 @@ struct CaptureView: View {
                         )
                     }
                     
-                    Button(action: { showDocumentPicker = true }) {
+                    Button(action: { filePickerMode = .pdf; showFilePicker = true }) {
                         HStack(spacing: 12) {
                             Image(systemName: "doc.badge.plus")
                                 .font(.system(size: 20))
@@ -105,6 +116,56 @@ struct CaptureView: View {
                         )
                         .cornerRadius(14)
                         .shadow(color: Color(red: 0.53, green: 0.81, blue: 0.92).opacity(0.4), radius: 8, y: 4)
+                    }
+                    
+                    if isTeamAccount {
+                        Button(action: { filePickerMode = .trackmanCSV; showFilePicker = true }) {
+                            HStack(spacing: 12) {
+                                Image(systemName: "tablecells.badge.ellipsis")
+                                    .font(.system(size: 20))
+                                Text("Upload Trackman CSV")
+                                    .font(.system(size: 17, weight: .semibold))
+                            }
+                            .foregroundColor(.white)
+                            .frame(maxWidth: .infinity)
+                            .padding(.vertical, 16)
+                            .background(
+                                LinearGradient(
+                                    colors: [
+                                        Color(red: 0.35, green: 0.75, blue: 0.45),
+                                        Color(red: 0.25, green: 0.60, blue: 0.35)
+                                    ],
+                                    startPoint: .leading,
+                                    endPoint: .trailing
+                                )
+                            )
+                            .cornerRadius(14)
+                            .shadow(color: Color(red: 0.35, green: 0.75, blue: 0.45).opacity(0.4), radius: 8, y: 4)
+                        }
+                        
+                        Button(action: { filePickerMode = .hawkeyeCSV; showFilePicker = true }) {
+                            HStack(spacing: 12) {
+                                Image(systemName: "eye.trianglebadge.exclamationmark")
+                                    .font(.system(size: 20))
+                                Text("Upload Hawkeye CSV")
+                                    .font(.system(size: 17, weight: .semibold))
+                            }
+                            .foregroundColor(.white)
+                            .frame(maxWidth: .infinity)
+                            .padding(.vertical, 16)
+                            .background(
+                                LinearGradient(
+                                    colors: [
+                                        Color(red: 0.85, green: 0.55, blue: 0.20),
+                                        Color(red: 0.70, green: 0.40, blue: 0.15)
+                                    ],
+                                    startPoint: .leading,
+                                    endPoint: .trailing
+                                )
+                            )
+                            .cornerRadius(14)
+                            .shadow(color: Color(red: 0.85, green: 0.55, blue: 0.20).opacity(0.4), radius: 8, y: 4)
+                        }
                     }
                     
                     Button(action: {
@@ -171,14 +232,24 @@ struct CaptureView: View {
             }
         }
         .fileImporter(
-            isPresented: $showDocumentPicker,
-            allowedContentTypes: [.pdf],
+            isPresented: $showFilePicker,
+            allowedContentTypes: filePickerMode == .pdf ? [.pdf] : [.commaSeparatedText],
             allowsMultipleSelection: false
         ) { result in
-            handlePDFImport(result: result)
+            switch filePickerMode {
+            case .pdf: handlePDFImport(result: result)
+            case .trackmanCSV: handleCSVImport(result: result)
+            case .hawkeyeCSV: handleHawkeyeImport(result: result)
+            case .none: break
+            }
+        }
+        .sheet(isPresented: $showCSVSummary) {
+            if let result = csvImportResult {
+                CSVImportSummaryView(result: result)
+            }
         }
         .overlay {
-            if isImportingPDF {
+            if isImportingPDF || isImportingCSV || isImportingHawkeye {
                 Color.black.opacity(0.5)
                     .ignoresSafeArea()
                 VStack(spacing: 16) {
@@ -236,13 +307,163 @@ struct CaptureView: View {
                 
                 importProgressMessage = "Importing Trackman report..."
                 let savedIds = try await TrackmanPDFImporter.importFrom(url: url)
-                onPDFUploadComplete?(savedIds)
+                onPDFUploadComplete?(Set(savedIds))
+            } catch {
+                importErrorMessage = error.localizedDescription
+            }
+        }
+    }
+    
+    private func handleCSVImport(result: Result<[URL], Error>) {
+        Task {
+            isImportingCSV = true
+            importProgressMessage = "Reading CSV..."
+            importErrorMessage = nil
+            defer {
+                isImportingCSV = false
+                importProgressMessage = nil
+            }
+            
+            do {
+                guard case .success(let urls) = result, let url = urls.first else {
+                    return
+                }
+                guard url.startAccessingSecurityScopedResource() else {
+                    importErrorMessage = "Could not access the selected file"
+                    return
+                }
+                defer { url.stopAccessingSecurityScopedResource() }
+                
+                importProgressMessage = "Importing pitches for all pitchers..."
+                let response = try await TrackmanCSVImporter.importFrom(url: url)
+                csvImportResult = response
+                showCSVSummary = true
+            } catch {
+                importErrorMessage = error.localizedDescription
+            }
+        }
+    }
+    
+    private func handleHawkeyeImport(result: Result<[URL], Error>) {
+        Task {
+            isImportingHawkeye = true
+            importProgressMessage = "Reading Hawkeye CSV..."
+            importErrorMessage = nil
+            defer {
+                isImportingHawkeye = false
+                importProgressMessage = nil
+            }
+            
+            do {
+                guard case .success(let urls) = result, let url = urls.first else {
+                    return
+                }
+                guard url.startAccessingSecurityScopedResource() else {
+                    importErrorMessage = "Could not access the selected file"
+                    return
+                }
+                defer { url.stopAccessingSecurityScopedResource() }
+                
+                importProgressMessage = "Importing Hawkeye pitches..."
+                let response = try await HawkeyeCSVImporter.importFrom(url: url)
+                csvImportResult = response
+                showCSVSummary = true
             } catch {
                 importErrorMessage = error.localizedDescription
             }
         }
     }
 }
+
+struct CSVImportSummaryView: View {
+    let result: TrackmanCSVImporter.ImportResponse
+    @Environment(\.dismiss) private var dismiss
+    
+    var body: some View {
+        NavigationStack {
+            ScrollView {
+                VStack(spacing: 20) {
+                    VStack(spacing: 8) {
+                        Image(systemName: "checkmark.circle.fill")
+                            .font(.system(size: 48))
+                            .foregroundColor(Color(red: 0.35, green: 0.75, blue: 0.45))
+                        
+                        Text("CSV Import Complete")
+                            .font(.system(size: 22, weight: .bold))
+                            .foregroundColor(.white)
+                        
+                        Text("\(result.totalPitches) pitches across \(result.pitchers.count) pitcher\(result.pitchers.count == 1 ? "" : "s")")
+                            .font(.subheadline)
+                            .foregroundColor(.white.opacity(0.7))
+                    }
+                    .padding(.top, 24)
+                    
+                    ForEach(result.pitchers) { pitcher in
+                        HStack(spacing: 14) {
+                            ZStack {
+                                Circle()
+                                    .fill(Color(red: 0.53, green: 0.81, blue: 0.92).opacity(0.2))
+                                    .frame(width: 44, height: 44)
+                                Text(pitcher.pitcherHand == "L" ? "LHP" : "RHP")
+                                    .font(.system(size: 12, weight: .bold))
+                                    .foregroundColor(Color(red: 0.53, green: 0.81, blue: 0.92))
+                            }
+                            
+                            VStack(alignment: .leading, spacing: 4) {
+                                Text(pitcher.pitcherName)
+                                    .font(.system(size: 16, weight: .semibold))
+                                    .foregroundColor(.white)
+                                
+                                HStack(spacing: 8) {
+                                    Text("\(pitcher.pitchCount) pitch\(pitcher.pitchCount == 1 ? "" : "es")")
+                                        .font(.caption)
+                                        .foregroundColor(.white.opacity(0.6))
+                                    
+                                    if pitcher.profileCreated {
+                                        Text("NEW PROFILE")
+                                            .font(.system(size: 10, weight: .bold))
+                                            .foregroundColor(Color(red: 0.35, green: 0.75, blue: 0.45))
+                                            .padding(.horizontal, 6)
+                                            .padding(.vertical, 2)
+                                            .background(Color(red: 0.35, green: 0.75, blue: 0.45).opacity(0.15))
+                                            .cornerRadius(4)
+                                    } else {
+                                        Text("EXISTING")
+                                            .font(.system(size: 10, weight: .bold))
+                                            .foregroundColor(.white.opacity(0.4))
+                                            .padding(.horizontal, 6)
+                                            .padding(.vertical, 2)
+                                            .background(Color.white.opacity(0.05))
+                                            .cornerRadius(4)
+                                    }
+                                }
+                            }
+                            
+                            Spacer()
+                            
+                            Image(systemName: "checkmark.circle.fill")
+                                .foregroundColor(Color(red: 0.35, green: 0.75, blue: 0.45))
+                        }
+                        .padding(16)
+                        .background(Color.white.opacity(0.06))
+                        .cornerRadius(12)
+                    }
+                }
+                .padding(.horizontal, 20)
+                .padding(.bottom, 40)
+            }
+            .background(Color(red: 0.08, green: 0.09, blue: 0.14).ignoresSafeArea())
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("Done") { dismiss() }
+                        .foregroundColor(Color(red: 0.53, green: 0.81, blue: 0.92))
+                }
+            }
+        }
+    }
+}
+
 
 struct StuffPlusBadge: View {
     let value: Double

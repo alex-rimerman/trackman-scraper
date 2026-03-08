@@ -26,14 +26,25 @@ struct LoginView: View {
                             .font(.system(size: 56))
                             .foregroundColor(Color(red: 0.53, green: 0.81, blue: 0.92))
                         
+                        Text("Arsenal IQ by")
+                            .font(.system(size: 28, weight: .bold, design: .rounded))
+                            .foregroundColor(.white)
+                            .multilineTextAlignment(.center)
+                            .frame(maxWidth: .infinity)
+                        
                         Text("Developing Baseball")
                             .font(.system(size: 32, weight: .bold, design: .rounded))
                             .foregroundColor(.white)
+                            .multilineTextAlignment(.center)
+                            .frame(maxWidth: .infinity)
                         
                         Text("Trackman Pitch Analyzer")
                             .font(.system(size: 16, weight: .medium))
                             .foregroundColor(Color(red: 0.53, green: 0.81, blue: 0.92).opacity(0.8))
+                            .multilineTextAlignment(.center)
+                            .frame(maxWidth: .infinity)
                     }
+                    .frame(maxWidth: .infinity)
                     
                     // Toggle Login / Signup
                     HStack(spacing: 0) {

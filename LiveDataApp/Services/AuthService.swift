@@ -144,21 +144,65 @@ class AuthService {
         return try await post(endpoint: "/profiles", body: CreateProfileRequest(name: name), authenticated: true)
     }
     
+    static func deleteProfile(id: String) async throws {
+        try await delete(endpoint: "/profiles/\(id)")
+    }
+    
+    static func renameProfile(id: String, name: String) async throws -> Profile {
+        struct Req: Codable { let name: String }
+        return try await put(endpoint: "/profiles/\(id)", body: Req(name: name), authenticated: true)
+    }
+    
+    static func mergeProfiles(sourceId: String, targetId: String) async throws {
+        struct Req: Codable {
+            let sourceProfileId: String
+            let targetProfileId: String
+            enum CodingKeys: String, CodingKey {
+                case sourceProfileId = "source_profile_id"
+                case targetProfileId = "target_profile_id"
+            }
+        }
+        struct Resp: Codable { let detail: String }
+        let _: Resp = try await post(
+            endpoint: "/profiles/merge",
+            body: Req(sourceProfileId: sourceId, targetProfileId: targetId),
+            authenticated: true
+        )
+    }
+    
     // MARK: - Pitch Storage Endpoints
     
     static func savePitch(_ request: SavePitchRequest) async throws -> SavedPitch {
         return try await post(endpoint: "/pitches", body: request, authenticated: true)
     }
     
-    static func getPitches(limit: Int = 50, offset: Int = 0, pitchType: String? = nil, profileId: String? = nil) async throws -> [SavedPitch] {
+    static func getPitches(
+        limit: Int = 50,
+        offset: Int = 0,
+        pitchType: String? = nil,
+        profileId: String? = nil,
+        dateFrom: String? = nil,
+        dateTo: String? = nil,
+        stuffMin: Double? = nil,
+        stuffMax: Double? = nil,
+        source: String? = nil
+    ) async throws -> [SavedPitch] {
         var endpoint = "/pitches?limit=\(limit)&offset=\(offset)"
-        if let pitchType = pitchType {
-            endpoint += "&pitch_type=\(pitchType)"
-        }
-        if let profileId = profileId {
-            endpoint += "&profile_id=\(profileId.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? profileId)"
-        }
+        if let pitchType { endpoint += "&pitch_type=\(pitchType)" }
+        if let profileId { endpoint += "&profile_id=\(profileId.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? profileId)" }
+        if let dateFrom { endpoint += "&date_from=\(dateFrom)" }
+        if let dateTo { endpoint += "&date_to=\(dateTo)" }
+        if let stuffMin { endpoint += "&stuff_min=\(stuffMin)" }
+        if let stuffMax { endpoint += "&stuff_max=\(stuffMax)" }
+        if let source { endpoint += "&source=\(source)" }
         return try await get(endpoint: endpoint, authenticated: true)
+    }
+    
+    static func exportPitchesURL(profileId: String? = nil) -> URL? {
+        var endpoint = "\(baseURL)/pitches/export?"
+        if let profileId { endpoint += "profile_id=\(profileId)&" }
+        if let tok = token { endpoint += "token=\(tok)" }
+        return URL(string: endpoint)
     }
     
     /// Permanently delete the user's account and all associated data.
@@ -191,29 +235,12 @@ class AuthService {
         logout()
     }
 
+    static func updatePitch(id: String, _ request: UpdatePitchRequest) async throws -> SavedPitch {
+        return try await put(endpoint: "/pitches/\(id)", body: request, authenticated: true)
+    }
+    
     static func deletePitch(id: String) async throws {
-        guard let url = URL(string: "\(baseURL)/pitches/\(id)") else {
-            throw AuthError.invalidURL
-        }
-        var request = URLRequest(url: url)
-        request.httpMethod = "DELETE"
-        request.timeoutInterval = 15
-        
-        if let tok = token {
-            request.setValue("Bearer \(tok)", forHTTPHeaderField: "Authorization")
-        }
-        
-        let (_, response) = try await URLSession.shared.data(for: request)
-        guard let http = response as? HTTPURLResponse else {
-            throw AuthError.networkError("Invalid response")
-        }
-        if http.statusCode == 401 {
-            logout()
-            throw AuthError.unauthorized
-        }
-        guard (200...299).contains(http.statusCode) else {
-            throw AuthError.serverError("Delete failed (status \(http.statusCode))")
-        }
+        try await delete(endpoint: "/pitches/\(id)")
     }
     
     // MARK: - HTTP Helpers
@@ -226,6 +253,42 @@ class AuthService {
         }
         var request = URLRequest(url: url)
         request.httpMethod = "POST"
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.timeoutInterval = 15
+        request.httpBody = try JSONEncoder().encode(body)
+        
+        if authenticated, let tok = token {
+            request.setValue("Bearer \(tok)", forHTTPHeaderField: "Authorization")
+        }
+        
+        let (data, response) = try await URLSession.shared.data(for: request)
+        guard let http = response as? HTTPURLResponse else {
+            throw AuthError.networkError("Invalid response")
+        }
+        
+        if http.statusCode == 401 {
+            logout()
+            throw AuthError.unauthorized
+        }
+        
+        if (200...299).contains(http.statusCode) {
+            return try JSONDecoder().decode(R.self, from: data)
+        } else {
+            if let err = try? JSONDecoder().decode(ErrorResponse.self, from: data) {
+                throw AuthError.serverError(err.detail)
+            }
+            throw AuthError.serverError("Server error (status \(http.statusCode))")
+        }
+    }
+    
+    private static func put<T: Codable, R: Codable>(
+        endpoint: String, body: T, authenticated: Bool = false
+    ) async throws -> R {
+        guard let url = URL(string: "\(baseURL)\(endpoint)") else {
+            throw AuthError.invalidURL
+        }
+        var request = URLRequest(url: url)
+        request.httpMethod = "PUT"
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
         request.timeoutInterval = 15
         request.httpBody = try JSONEncoder().encode(body)
@@ -285,6 +348,32 @@ class AuthService {
                 throw AuthError.serverError(err.detail)
             }
             throw AuthError.serverError("Server error (status \(http.statusCode))")
+        }
+    }
+    
+    private static func delete(endpoint: String) async throws {
+        guard let url = URL(string: "\(baseURL)\(endpoint)") else {
+            throw AuthError.invalidURL
+        }
+        var request = URLRequest(url: url)
+        request.httpMethod = "DELETE"
+        request.timeoutInterval = 15
+        if let tok = token {
+            request.setValue("Bearer \(tok)", forHTTPHeaderField: "Authorization")
+        }
+        let (data, response) = try await URLSession.shared.data(for: request)
+        guard let http = response as? HTTPURLResponse else {
+            throw AuthError.networkError("Invalid response")
+        }
+        if http.statusCode == 401 {
+            logout()
+            throw AuthError.unauthorized
+        }
+        guard (200...299).contains(http.statusCode) else {
+            if let err = try? JSONDecoder().decode(ErrorResponse.self, from: data) {
+                throw AuthError.serverError(err.detail)
+            }
+            throw AuthError.serverError("Delete failed (status \(http.statusCode))")
         }
     }
 }
