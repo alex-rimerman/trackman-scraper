@@ -85,6 +85,50 @@ def _color_to_rgb(color_tuple):
         return None
 
 
+def infer_pitcher_hand_from_release_side(pitches: list[dict]) -> str | None:
+    """
+    Infer pitcher hand from release_side (RelSide).
+    Trackman convention: negative RelSide → LHP (glove / third-base side), positive → RHP.
+    Uses the mean sign across all pitches with valid RelSide (works for a single pitch too).
+    Returns 'L', 'R', or None if no release_side data or mean is exactly zero.
+    """
+    rel_sides = [
+        float(p["release_side"])
+        for p in pitches
+        if p.get("release_side") is not None and not np.isnan(p["release_side"])
+    ]
+    if not rel_sides:
+        return None
+    avg = float(np.mean(rel_sides))
+    if avg < 0:
+        return "L"
+    if avg > 0:
+        return "R"
+    return None
+
+
+def parse_pitcher_hand_from_pdf(pdf_path: str | Path, pitches: list[dict] | None = None) -> str:
+    """
+    Infer pitcher hand (L/R). Tries in order:
+    1. Release side (mean RelSide < 0 → LHP, > 0 → RHP)
+    2. PDF text (LHP, LEFT, RHP, RIGHT on first page)
+    Default 'R'.
+    """
+    if pitches:
+        hand = infer_pitcher_hand_from_release_side(pitches)
+        if hand:
+            return hand
+    with pdfplumber.open(pdf_path) as pdf:
+        if not pdf.pages:
+            return "R"
+        text = (pdf.pages[0].extract_text() or "").upper()
+        has_left = "LHP" in text or " LEFT" in text or "LEFT " in text or text.startswith("LEFT")
+        has_right = "RHP" in text or " RIGHT" in text or "RIGHT " in text or text.startswith("RIGHT")
+        if has_left and not has_right:
+            return "L"
+        return "R"
+
+
 def parse_trackman_pdf(pdf_path: str | Path) -> list[dict]:
     """
     Parse Trackman PDF and return list of pitches with TaggedPitchType from color matching.

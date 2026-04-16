@@ -20,7 +20,11 @@ struct CaptureView: View {
     enum FilePickerMode { case pdf, trackmanCSV, hawkeyeCSV }
     @State private var filePickerMode: FilePickerMode?
     @State private var showFilePicker = false
-    
+    @State private var pendingPDFURL: URL?
+    @State private var showPDFHandSheet = false
+    /// "R" or "L" — user must choose before import (no auto-detect in UI).
+    @State private var pdfPitcherHand = "R"
+
     private var isTeamAccount: Bool {
         AuthService.accountType == "team"
     }
@@ -248,6 +252,48 @@ struct CaptureView: View {
                 CSVImportSummaryView(result: result)
             }
         }
+        .sheet(isPresented: $showPDFHandSheet) {
+            NavigationStack {
+                VStack(spacing: 24) {
+                    Text("Pitcher hand")
+                        .font(.headline)
+                        .foregroundColor(.white)
+                    Text("Select the pitcher’s throwing hand for this report.")
+                        .font(.caption)
+                        .foregroundColor(.white.opacity(0.65))
+                        .multilineTextAlignment(.center)
+                        .padding(.horizontal)
+                    Picker("Hand", selection: $pdfPitcherHand) {
+                        Text("Right (RHP)").tag("R")
+                        Text("Left (LHP)").tag("L")
+                    }
+                    .pickerStyle(.segmented)
+                    .padding(.horizontal)
+                    Spacer()
+                }
+                .padding()
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                .background(Color(red: 0.08, green: 0.12, blue: 0.18))
+                .navigationBarTitleDisplayMode(.inline)
+                .toolbar {
+                    ToolbarItem(placement: .cancellationAction) {
+                        Button("Cancel") {
+                            showPDFHandSheet = false
+                            pendingPDFURL?.stopAccessingSecurityScopedResource()
+                            pendingPDFURL = nil
+                        }
+                        .foregroundColor(.white.opacity(0.9))
+                    }
+                    ToolbarItem(placement: .confirmationAction) {
+                        Button("Import") {
+                            confirmPDFImport()
+                        }
+                        .fontWeight(.semibold)
+                        .foregroundColor(Color(red: 0.53, green: 0.81, blue: 0.92))
+                    }
+                }
+            }
+        }
         .overlay {
             if isImportingPDF || isImportingCSV || isImportingHawkeye {
                 Color.black.opacity(0.5)
@@ -286,27 +332,31 @@ struct CaptureView: View {
     }
     
     private func handlePDFImport(result: Result<[URL], Error>) {
+        guard case .success(let urls) = result, let url = urls.first else { return }
+        guard url.startAccessingSecurityScopedResource() else {
+            importErrorMessage = "Could not access the selected file"
+            return
+        }
+        pendingPDFURL = url
+        pdfPitcherHand = "R"
+        showPDFHandSheet = true
+    }
+    
+    private func confirmPDFImport() {
+        guard let url = pendingPDFURL else { return }
+        showPDFHandSheet = false
         Task {
             isImportingPDF = true
-            importProgressMessage = "Opening PDF..."
+            importProgressMessage = "Importing Trackman report..."
             importErrorMessage = nil
             defer {
                 isImportingPDF = false
                 importProgressMessage = nil
+                pendingPDFURL = nil
+                url.stopAccessingSecurityScopedResource()
             }
-            
             do {
-                guard case .success(let urls) = result, let url = urls.first else {
-                    return
-                }
-                guard url.startAccessingSecurityScopedResource() else {
-                    importErrorMessage = "Could not access the selected file"
-                    return
-                }
-                defer { url.stopAccessingSecurityScopedResource() }
-                
-                importProgressMessage = "Importing Trackman report..."
-                let savedIds = try await TrackmanPDFImporter.importFrom(url: url)
+                let savedIds = try await TrackmanPDFImporter.importFrom(url: url, pitcherHand: pdfPitcherHand)
                 onPDFUploadComplete?(Set(savedIds))
             } catch {
                 importErrorMessage = error.localizedDescription

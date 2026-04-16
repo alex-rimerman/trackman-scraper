@@ -12,10 +12,13 @@ struct SignupRequest: Codable {
     let name: String
     let password: String
     let accountType: String  // "personal" | "team"
-    
+    /// Set after an in-app purchase when the server requires payment before signup.
+    let revenuecatAppUserId: String?
+
     enum CodingKeys: String, CodingKey {
         case email, name, password
         case accountType = "account_type"
+        case revenuecatAppUserId = "revenuecat_app_user_id"
     }
 }
 
@@ -56,6 +59,9 @@ struct AuthMeResponse: Codable {
     let defaultProfileId: String?
     let isSubscribed: Bool
     let subscriptionExpiresAt: String?
+    let subscriptionStatus: String?
+    let subscriptionPlan: String?
+    let subscriptionProductId: String?
 
     enum CodingKeys: String, CodingKey {
         case userId = "user_id"
@@ -65,6 +71,9 @@ struct AuthMeResponse: Codable {
         case defaultProfileId = "default_profile_id"
         case isSubscribed = "is_subscribed"
         case subscriptionExpiresAt = "subscription_expires_at"
+        case subscriptionStatus = "subscription_status"
+        case subscriptionPlan = "subscription_plan"
+        case subscriptionProductId = "subscription_product_id"
     }
 }
 

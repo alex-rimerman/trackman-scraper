@@ -35,6 +35,13 @@ struct MainTabView: View {
                     Text("Report")
                 }
                 .tag(2)
+
+            AccountView(authViewModel: authViewModel)
+                .tabItem {
+                    Image(systemName: "person.crop.circle.fill")
+                    Text("Account")
+                }
+                .tag(3)
         }
         .tint(Color(red: 0.53, green: 0.81, blue: 0.92))
         .preferredColorScheme(.dark)

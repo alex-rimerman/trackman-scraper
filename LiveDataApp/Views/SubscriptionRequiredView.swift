@@ -3,6 +3,7 @@ import SwiftUI
 struct SubscriptionRequiredView: View {
     @ObservedObject var authViewModel: AuthViewModel
     @State private var selectedPlan: SubscriptionPlan = .personal
+    @State private var billingPeriod: SubscriptionBillingPeriod = .monthly
     @State private var isPurchasing = false
     @State private var errorMessage: String?
     @State private var hasCheckedStatus = false
@@ -17,17 +18,8 @@ struct SubscriptionRequiredView: View {
             case .team: return "Team"
             }
         }
-        var price: String {
-            switch self {
-            case .personal: return "$5/mo"
-            case .team: return "$30/mo"
-            }
-        }
-        var productId: String {
-            switch self {
-            case .personal: return "123"
-            case .team: return "125"
-            }
+        func priceHint(for period: SubscriptionBillingPeriod) -> String {
+            SubscriptionService.priceHint(accountType: rawValue, period: period)
         }
     }
 
@@ -64,6 +56,25 @@ struct SubscriptionRequiredView: View {
                         .padding(.horizontal)
 
                     VStack(spacing: 12) {
+                        HStack(spacing: 0) {
+                            ForEach(SubscriptionBillingPeriod.allCases, id: \.self) { period in
+                                Button(action: { billingPeriod = period }) {
+                                    Text(period == .monthly ? "Monthly" : "Yearly")
+                                        .font(.system(size: 14, weight: .semibold))
+                                        .foregroundColor(billingPeriod == period ? .white : .white.opacity(0.5))
+                                        .frame(maxWidth: .infinity)
+                                        .padding(.vertical, 12)
+                                        .background(billingPeriod == period ? Color.white.opacity(0.15) : Color.clear)
+                                        .cornerRadius(10)
+                                        .contentShape(Rectangle())
+                                }
+                                .buttonStyle(.plain)
+                            }
+                        }
+                        .padding(4)
+                        .background(Color.white.opacity(0.06))
+                        .cornerRadius(12)
+
                         ForEach(SubscriptionPlan.allCases, id: \.self) { plan in
                             planCard(plan)
                         }
@@ -176,7 +187,7 @@ struct SubscriptionRequiredView: View {
                     Text(plan.title)
                         .font(.system(size: 17, weight: .semibold))
                         .foregroundColor(.white)
-                    Text(plan.price)
+                    Text(plan.priceHint(for: billingPeriod))
                         .font(.system(size: 14))
                         .foregroundColor(.white.opacity(0.8))
                 }
@@ -208,7 +219,8 @@ struct SubscriptionRequiredView: View {
         }
         isPurchasing = true
         defer { isPurchasing = false }
-        await SubscriptionService.shared.purchase(productId: selectedPlan.productId) { result in
+        let pid = SubscriptionService.productId(accountType: selectedPlan.rawValue, period: billingPeriod)
+        await SubscriptionService.shared.purchase(productId: pid) { result in
             Task { @MainActor in
                 switch result {
                 case .success:

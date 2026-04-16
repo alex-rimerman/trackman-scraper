@@ -15,6 +15,10 @@ class AuthViewModel: ObservableObject {
     /// When set after signup, SubscriptionRequiredView auto-starts purchase for this plan.
     @Published var pendingSignupPlan: String? = nil  // "personal" | "team"
 
+    /// Sign up: IAP must succeed before the account form when `SubscriptionService.signupRequiresPayment` is true.
+    @Published var signupPurchaseCompleted: Bool = false
+    @Published var signupBillingPeriod: SubscriptionBillingPeriod = .monthly
+
     // Login / Signup form state
     @Published var email: String = ""
     @Published var password: String = ""
@@ -47,6 +51,19 @@ class AuthViewModel: ObservableObject {
         isLoading = false
     }
     
+    /// Completes StoreKit purchase for the selected account type and billing period (anonymous RevenueCat user).
+    func completeSignupPurchase() async -> String? {
+        let productId = SubscriptionService.productId(accountType: accountType, period: signupBillingPeriod)
+        do {
+            try await SubscriptionService.shared.purchaseAsync(productId: productId)
+            return nil
+        } catch let err as PurchaseError {
+            return err.message
+        } catch {
+            return error.localizedDescription
+        }
+    }
+
     func signup() async {
         guard !email.isEmpty, !password.isEmpty, !name.isEmpty else {
             errorMessage = "Please fill in all fields"
@@ -56,23 +73,36 @@ class AuthViewModel: ObservableObject {
             errorMessage = "Password must be at least 6 characters"
             return
         }
+        if SubscriptionService.signupRequiresPayment && !signupPurchaseCompleted {
+            errorMessage = "Subscribe first, then create your account."
+            return
+        }
         isLoading = true
         errorMessage = nil
-        
+
+        let rcId: String? = SubscriptionService.signupRequiresPayment ? SubscriptionService.revenueCatAppUserID : nil
+
         do {
-            let response = try await AuthService.signup(email: email, name: name, password: password, accountType: accountType)
+            let response = try await AuthService.signup(
+                email: email,
+                name: name,
+                password: password,
+                accountType: accountType,
+                revenuecatAppUserId: rcId
+            )
             userName = response.name
             userEmail = response.email
             accountType = response.resolvedAccountType
             isSubscribed = response.resolvedIsSubscribed
             isLoggedIn = true
-            pendingSignupPlan = accountType  // Auto-charge on subscription screen
+            pendingSignupPlan = nil
+            signupPurchaseCompleted = false
             SubscriptionService.logIn(userId: response.userId)
             clearForm()
         } catch {
             errorMessage = error.localizedDescription
         }
-        
+
         isLoading = false
     }
     
@@ -117,6 +147,7 @@ class AuthViewModel: ObservableObject {
 
     func logout() {
         pendingSignupPlan = nil
+        signupPurchaseCompleted = false
         SubscriptionService.logOut()
         AuthService.logout()
         applySessionInvalidated()
@@ -128,6 +159,7 @@ class AuthViewModel: ObservableObject {
         isSubscribed = false
         userName = ""
         userEmail = ""
+        signupPurchaseCompleted = false
         clearForm()
     }
     

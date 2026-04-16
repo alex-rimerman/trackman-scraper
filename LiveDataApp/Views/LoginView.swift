@@ -50,6 +50,7 @@ struct LoginView: View {
                     HStack(spacing: 0) {
                         Button(action: {
                             authViewModel.errorMessage = nil
+                            authViewModel.signupPurchaseCompleted = false
                             withAnimation { authViewModel.isSignup = false }
                         }) {
                             Text("Log In")
@@ -65,6 +66,7 @@ struct LoginView: View {
                         
                         Button(action: {
                             authViewModel.errorMessage = nil
+                            authViewModel.signupPurchaseCompleted = false
                             withAnimation { authViewModel.isSignup = true }
                         }) {
                             Text("Sign Up")
@@ -85,7 +87,9 @@ struct LoginView: View {
                     
                     // Form
                     VStack(spacing: 16) {
-                        if authViewModel.isSignup {
+                        if authViewModel.isSignup && SubscriptionService.signupRequiresPayment && !authViewModel.signupPurchaseCompleted {
+                            signupPaywallSection
+                        } else if authViewModel.isSignup {
                             formField(
                                 icon: "person.fill",
                                 placeholder: "Full Name",
@@ -93,67 +97,71 @@ struct LoginView: View {
                                 isSecure: false
                             )
                             .transition(.opacity.combined(with: .move(edge: .top)))
-                            
-                            // Account type: Personal vs Team
-                            VStack(alignment: .leading, spacing: 8) {
-                                Text("Account Type")
-                                    .font(.system(size: 13, weight: .medium))
-                                    .foregroundColor(.white.opacity(0.6))
-                                
-                                HStack(spacing: 0) {
-                                    Button(action: { authViewModel.accountType = "personal" }) {
-                                        HStack(spacing: 6) {
-                                            Image(systemName: "person.fill")
-                                            Text("Personal")
-                                                .font(.system(size: 14, weight: .medium))
+
+                            if !SubscriptionService.signupRequiresPayment {
+                                // Account type: Personal vs Team (skipped when paywall already captured plan)
+                                VStack(alignment: .leading, spacing: 8) {
+                                    Text("Account Type")
+                                        .font(.system(size: 13, weight: .medium))
+                                        .foregroundColor(.white.opacity(0.6))
+
+                                    HStack(spacing: 0) {
+                                        Button(action: { authViewModel.accountType = "personal" }) {
+                                            HStack(spacing: 6) {
+                                                Image(systemName: "person.fill")
+                                                Text("Personal")
+                                                    .font(.system(size: 14, weight: .medium))
+                                            }
+                                            .foregroundColor(authViewModel.accountType == "personal" ? .white : .white.opacity(0.5))
+                                            .frame(maxWidth: .infinity)
+                                            .padding(.vertical, 12)
+                                            .background(authViewModel.accountType == "personal" ? Color.white.opacity(0.15) : Color.clear)
+                                            .cornerRadius(10)
+                                            .contentShape(Rectangle())
                                         }
-                                        .foregroundColor(authViewModel.accountType == "personal" ? .white : .white.opacity(0.5))
-                                        .frame(maxWidth: .infinity)
-                                        .padding(.vertical, 12)
-                                        .background(authViewModel.accountType == "personal" ? Color.white.opacity(0.15) : Color.clear)
-                                        .cornerRadius(10)
-                                        .contentShape(Rectangle())
-                                    }
-                                    .buttonStyle(.plain)
-                                    
-                                    Button(action: { authViewModel.accountType = "team" }) {
-                                        HStack(spacing: 6) {
-                                            Image(systemName: "person.3.fill")
-                                            Text("Team")
-                                                .font(.system(size: 14, weight: .medium))
+                                        .buttonStyle(.plain)
+
+                                        Button(action: { authViewModel.accountType = "team" }) {
+                                            HStack(spacing: 6) {
+                                                Image(systemName: "person.3.fill")
+                                                Text("Team")
+                                                    .font(.system(size: 14, weight: .medium))
+                                            }
+                                            .foregroundColor(authViewModel.accountType == "team" ? .white : .white.opacity(0.5))
+                                            .frame(maxWidth: .infinity)
+                                            .padding(.vertical, 12)
+                                            .background(authViewModel.accountType == "team" ? Color.white.opacity(0.15) : Color.clear)
+                                            .cornerRadius(10)
+                                            .contentShape(Rectangle())
                                         }
-                                        .foregroundColor(authViewModel.accountType == "team" ? .white : .white.opacity(0.5))
-                                        .frame(maxWidth: .infinity)
-                                        .padding(.vertical, 12)
-                                        .background(authViewModel.accountType == "team" ? Color.white.opacity(0.15) : Color.clear)
-                                        .cornerRadius(10)
-                                        .contentShape(Rectangle())
+                                        .buttonStyle(.plain)
                                     }
-                                    .buttonStyle(.plain)
+                                    .padding(4)
+                                    .background(Color.white.opacity(0.05))
+                                    .cornerRadius(12)
                                 }
-                                .padding(4)
-                                .background(Color.white.opacity(0.05))
-                                .cornerRadius(12)
+                                .transition(.opacity.combined(with: .move(edge: .top)))
                             }
-                            .transition(.opacity.combined(with: .move(edge: .top)))
                         }
-                        
-                        formField(
-                            icon: "envelope.fill",
-                            placeholder: "Email",
-                            text: $authViewModel.email,
-                            isSecure: false,
-                            keyboardType: .emailAddress,
-                            autocapitalization: .never
-                        )
-                        
-                        formField(
-                            icon: "lock.fill",
-                            placeholder: "Password",
-                            text: $authViewModel.password,
-                            isSecure: true
-                        )
-                        
+
+                        if !showSignupPaywall {
+                            formField(
+                                icon: "envelope.fill",
+                                placeholder: "Email",
+                                text: $authViewModel.email,
+                                isSecure: false,
+                                keyboardType: .emailAddress,
+                                autocapitalization: .never
+                            )
+
+                            formField(
+                                icon: "lock.fill",
+                                placeholder: "Password",
+                                text: $authViewModel.password,
+                                isSecure: true
+                            )
+                        }
+
                         if let error = authViewModel.errorMessage {
                             HStack {
                                 Image(systemName: "exclamationmark.triangle.fill")
@@ -173,7 +181,16 @@ struct LoginView: View {
                     // Submit button
                     Button {
                         Task { @MainActor in
-                            if authViewModel.isSignup {
+                            if authViewModel.isSignup && SubscriptionService.signupRequiresPayment && !authViewModel.signupPurchaseCompleted {
+                                authViewModel.isLoading = true
+                                authViewModel.errorMessage = nil
+                                if let err = await authViewModel.completeSignupPurchase() {
+                                    authViewModel.errorMessage = err
+                                } else {
+                                    authViewModel.signupPurchaseCompleted = true
+                                }
+                                authViewModel.isLoading = false
+                            } else if authViewModel.isSignup {
                                 await authViewModel.signup()
                             } else {
                                 await authViewModel.login()
@@ -186,7 +203,7 @@ struct LoginView: View {
                                     .progressViewStyle(CircularProgressViewStyle(tint: .white))
                                     .padding(.trailing, 8)
                             }
-                            Text(authViewModel.isSignup ? "Create Account" : "Log In")
+                            Text(submitButtonTitle)
                                 .font(.system(size: 18, weight: .semibold))
                         }
                         .foregroundColor(.white)
@@ -216,7 +233,99 @@ struct LoginView: View {
         }
         .preferredColorScheme(.dark)
     }
-    
+
+    private var showSignupPaywall: Bool {
+        authViewModel.isSignup && SubscriptionService.signupRequiresPayment && !authViewModel.signupPurchaseCompleted
+    }
+
+    private var submitButtonTitle: String {
+        if showSignupPaywall { return "Subscribe" }
+        if authViewModel.isSignup { return "Create Account" }
+        return "Log In"
+    }
+
+    private var signupPaywallSection: some View {
+        VStack(alignment: .leading, spacing: 16) {
+            Text("Subscribe to create an account")
+                .font(.system(size: 15, weight: .semibold))
+                .foregroundColor(.white)
+                .frame(maxWidth: .infinity, alignment: .leading)
+
+            Text("Choose plan and billing. After Apple confirms payment, you’ll enter your name, email, and password.")
+                .font(.system(size: 13))
+                .foregroundColor(.white.opacity(0.75))
+                .fixedSize(horizontal: false, vertical: true)
+
+            VStack(alignment: .leading, spacing: 8) {
+                Text("Account type")
+                    .font(.system(size: 13, weight: .medium))
+                    .foregroundColor(.white.opacity(0.6))
+                HStack(spacing: 0) {
+                    Button(action: { authViewModel.accountType = "personal" }) {
+                        HStack(spacing: 6) {
+                            Image(systemName: "person.fill")
+                            Text("Personal")
+                                .font(.system(size: 14, weight: .medium))
+                        }
+                        .foregroundColor(authViewModel.accountType == "personal" ? .white : .white.opacity(0.5))
+                        .frame(maxWidth: .infinity)
+                        .padding(.vertical, 12)
+                        .background(authViewModel.accountType == "personal" ? Color.white.opacity(0.15) : Color.clear)
+                        .cornerRadius(10)
+                        .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
+
+                    Button(action: { authViewModel.accountType = "team" }) {
+                        HStack(spacing: 6) {
+                            Image(systemName: "person.3.fill")
+                            Text("Team")
+                                .font(.system(size: 14, weight: .medium))
+                        }
+                        .foregroundColor(authViewModel.accountType == "team" ? .white : .white.opacity(0.5))
+                        .frame(maxWidth: .infinity)
+                        .padding(.vertical, 12)
+                        .background(authViewModel.accountType == "team" ? Color.white.opacity(0.15) : Color.clear)
+                        .cornerRadius(10)
+                        .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
+                }
+                .padding(4)
+                .background(Color.white.opacity(0.05))
+                .cornerRadius(12)
+            }
+
+            VStack(alignment: .leading, spacing: 8) {
+                Text("Billing")
+                    .font(.system(size: 13, weight: .medium))
+                    .foregroundColor(.white.opacity(0.6))
+                HStack(spacing: 0) {
+                    ForEach(SubscriptionBillingPeriod.allCases, id: \.self) { period in
+                        Button(action: { authViewModel.signupBillingPeriod = period }) {
+                            Text(period == .monthly ? "Monthly" : "Yearly")
+                                .font(.system(size: 14, weight: .medium))
+                                .foregroundColor(authViewModel.signupBillingPeriod == period ? .white : .white.opacity(0.5))
+                                .frame(maxWidth: .infinity)
+                                .padding(.vertical, 12)
+                                .background(authViewModel.signupBillingPeriod == period ? Color.white.opacity(0.15) : Color.clear)
+                                .cornerRadius(10)
+                                .contentShape(Rectangle())
+                        }
+                        .buttonStyle(.plain)
+                    }
+                }
+                .padding(4)
+                .background(Color.white.opacity(0.05))
+                .cornerRadius(12)
+            }
+
+            Text(SubscriptionService.priceHint(accountType: authViewModel.accountType, period: authViewModel.signupBillingPeriod))
+                .font(.system(size: 14, weight: .medium))
+                .foregroundColor(Color(red: 0.53, green: 0.81, blue: 0.92))
+        }
+    }
+
     // MARK: - Form Field
     
     private func formField(

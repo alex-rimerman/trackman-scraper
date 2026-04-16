@@ -4,7 +4,7 @@ import Foundation
 /// Uses color tags for pitch type classification (same logic as trackman_pdf_parser), not velocity.
 enum TrackmanPDFImporter {
 
-    struct ParsedPitch: Codable {
+    struct ParsedPitch: Decodable {
         let pitchType: String
         let pitchSpeed: Double?
         let inducedVertBreak: Double?
@@ -18,6 +18,8 @@ enum TrackmanPDFImporter {
         let tiltString: String?
         let stuffPlus: Double?
         let stuffPlusRaw: Double?
+        /// Inferred on server from RelSide (negative → LHP) when upload omits `pitcher_hand`.
+        let pitcherHand: String?
 
         enum CodingKeys: String, CodingKey {
             case pitchType = "pitch_type"
@@ -33,13 +35,33 @@ enum TrackmanPDFImporter {
             case tiltString = "tilt_string"
             case stuffPlus = "stuff_plus"
             case stuffPlusRaw = "stuff_plus_raw"
+            case pitcherHand = "pitcher_hand"
+        }
+
+        init(from decoder: Decoder) throws {
+            let c = try decoder.container(keyedBy: CodingKeys.self)
+            pitchType = try c.decode(String.self, forKey: .pitchType)
+            pitchSpeed = try c.decodeIfPresent(Double.self, forKey: .pitchSpeed)
+            inducedVertBreak = try c.decodeIfPresent(Double.self, forKey: .inducedVertBreak)
+            horzBreak = try c.decodeIfPresent(Double.self, forKey: .horzBreak)
+            releaseHeight = try c.decodeIfPresent(Double.self, forKey: .releaseHeight)
+            releaseSide = try c.decodeIfPresent(Double.self, forKey: .releaseSide)
+            extensionFt = try c.decodeIfPresent(Double.self, forKey: .extensionFt)
+            totalSpin = try c.decodeIfPresent(Double.self, forKey: .totalSpin)
+            efficiency = try c.decodeIfPresent(Double.self, forKey: .efficiency)
+            spinAxis = try c.decodeIfPresent(Double.self, forKey: .spinAxis)
+            tiltString = try c.decodeIfPresent(String.self, forKey: .tiltString)
+            stuffPlus = try c.decodeIfPresent(Double.self, forKey: .stuffPlus)
+            stuffPlusRaw = try c.decodeIfPresent(Double.self, forKey: .stuffPlusRaw)
+            pitcherHand = try c.decodeIfPresent(String.self, forKey: .pitcherHand)
         }
     }
 
     /// Upload PDF to backend, parse (color-based types), and save each pitch.
     /// Returns IDs of saved pitches.
-    static func importFrom(url: URL) async throws -> [String] {
-        let parsed = try await uploadAndParse(url: url)
+    /// - Parameter pitcherHand: "L" or "R". Pass nil only if you want the backend to infer from the PDF (e.g. API clients); the app always sends R or L from the import sheet.
+    static func importFrom(url: URL, pitcherHand: String? = nil) async throws -> [String] {
+        let parsed = try await uploadAndParse(url: url, pitcherHand: pitcherHand)
         var savedIds: [String] = []
         for p in parsed {
             let req = SavePitchRequest(
@@ -57,7 +79,7 @@ enum TrackmanPDFImporter {
                 efficiency: p.efficiency,
                 activeSpin: nil,
                 gyro: nil,
-                pitcherHand: "R",
+                pitcherHand: pitcherHand ?? p.pitcherHand ?? "R",
                 stuffPlus: p.stuffPlus,
                 stuffPlusRaw: p.stuffPlusRaw,
                 notes: nil,
@@ -69,7 +91,7 @@ enum TrackmanPDFImporter {
         return savedIds
     }
 
-    private static func uploadAndParse(url: URL) async throws -> [ParsedPitch] {
+    private static func uploadAndParse(url: URL, pitcherHand: String? = nil) async throws -> [ParsedPitch] {
         let data = try Data(contentsOf: url)
         let boundary = "Boundary-\(UUID().uuidString)"
         var body = Data()
@@ -77,7 +99,13 @@ enum TrackmanPDFImporter {
         body.append("Content-Disposition: form-data; name=\"file\"; filename=\"\(url.lastPathComponent)\"\r\n".data(using: .utf8)!)
         body.append("Content-Type: application/pdf\r\n\r\n".data(using: .utf8)!)
         body.append(data)
-        body.append("\r\n--\(boundary)--\r\n".data(using: .utf8)!)
+        if let hand = pitcherHand, hand == "L" || hand == "R" {
+            body.append("--\(boundary)\r\n".data(using: .utf8)!)
+            body.append("Content-Disposition: form-data; name=\"pitcher_hand\"\r\n\r\n".data(using: .utf8)!)
+            body.append(hand.data(using: .utf8)!)
+            body.append("\r\n".data(using: .utf8)!)
+        }
+        body.append("--\(boundary)--\r\n".data(using: .utf8)!)
 
         guard let requestURL = URL(string: "\(AuthService.baseURL)/parse-trackman-pdf") else {
             throw AuthError.invalidURL

@@ -11,11 +11,11 @@
   },
   "subscriptionGroups" : [
     {
-      "id" : "personal_monthly",
+      "id" : "livedata_pro_group",
       "localizations" : [
 
       ],
-      "name" : "LiveData Subscriptions",
+      "name" : "LiveData Pro",
       "subscriptions" : [
         {
           "adHocOffers" : [
@@ -27,19 +27,44 @@
           "displayPrice" : "4.99",
           "familyShareable" : false,
           "groupNumber" : 1,
-          "internalID" : "123",
+          "internalID" : "A001",
           "introductoryOffer" : null,
           "localizations" : [
             {
               "description" : "Personal monthly subscription",
-              "displayName" : "Personal",
+              "displayName" : "Personal Monthly",
               "locale" : "en_US"
             }
           ],
-          "productID" : "123",
+          "productID" : "livedata_personal_monthly",
           "recurringSubscriptionPeriod" : "P1M",
           "referenceName" : "Personal Monthly",
-          "subscriptionGroupID" : "personal_monthly",
+          "subscriptionGroupID" : "livedata_pro_group",
+          "type" : "RecurringSubscription"
+        },
+        {
+          "adHocOffers" : [
+
+          ],
+          "codeOffers" : [
+
+          ],
+          "displayPrice" : "49.99",
+          "familyShareable" : false,
+          "groupNumber" : 2,
+          "internalID" : "A002",
+          "introductoryOffer" : null,
+          "localizations" : [
+            {
+              "description" : "Personal annual subscription",
+              "displayName" : "Personal Yearly",
+              "locale" : "en_US"
+            }
+          ],
+          "productID" : "livedata_personal_annual",
+          "recurringSubscriptionPeriod" : "P1Y",
+          "referenceName" : "Personal Yearly",
+          "subscriptionGroupID" : "livedata_pro_group",
           "type" : "RecurringSubscription"
         },
         {
@@ -51,20 +76,45 @@
           ],
           "displayPrice" : "29.99",
           "familyShareable" : false,
-          "groupNumber" : 2,
-          "internalID" : "125",
+          "groupNumber" : 3,
+          "internalID" : "A003",
           "introductoryOffer" : null,
           "localizations" : [
             {
               "description" : "Team monthly subscription",
-              "displayName" : "Team",
+              "displayName" : "Team Monthly",
               "locale" : "en_US"
             }
           ],
-          "productID" : "125",
+          "productID" : "livedata_team_monthly",
           "recurringSubscriptionPeriod" : "P1M",
           "referenceName" : "Team Monthly",
-          "subscriptionGroupID" : "personal_monthly",
+          "subscriptionGroupID" : "livedata_pro_group",
+          "type" : "RecurringSubscription"
+        },
+        {
+          "adHocOffers" : [
+
+          ],
+          "codeOffers" : [
+
+          ],
+          "displayPrice" : "299.99",
+          "familyShareable" : false,
+          "groupNumber" : 4,
+          "internalID" : "A004",
+          "introductoryOffer" : null,
+          "localizations" : [
+            {
+              "description" : "Team annual subscription",
+              "displayName" : "Team Yearly",
+              "locale" : "en_US"
+            }
+          ],
+          "productID" : "livedata_team_annual",
+          "recurringSubscriptionPeriod" : "P1Y",
+          "referenceName" : "Team Yearly",
+          "subscriptionGroupID" : "livedata_pro_group",
           "type" : "RecurringSubscription"
         }
       ]

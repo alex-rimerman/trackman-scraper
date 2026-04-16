@@ -33,6 +33,7 @@
 		8DABA8162F36B0000020EB72 /* SubscriptionService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8DABA8172F36B0000020EB72 /* SubscriptionService.swift */; };
 		8DABA8202F36C0000020EB72 /* TrackmanCSVImporter.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8DABA8212F36C0000020EB72 /* TrackmanCSVImporter.swift */; };
 		8DABA8222F37D0000020EB72 /* HawkeyeCSVImporter.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8DABA8232F37D0000020EB72 /* HawkeyeCSVImporter.swift */; };
+		8DABA8282F38E0000020EB72 /* AccountView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8DABA8292F38E0000020EB72 /* AccountView.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -84,6 +85,7 @@
 		8DABA8182F36B0000020EB72 /* SubscriptionConfiguration.storekit */ = {isa = PBXFileReference; lastKnownFileType = text; path = SubscriptionConfiguration.storekit; sourceTree = "<group>"; };
 		8DABA8212F36C0000020EB72 /* TrackmanCSVImporter.swift */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.swift; path = TrackmanCSVImporter.swift; sourceTree = "<group>"; };
 		8DABA8232F37D0000020EB72 /* HawkeyeCSVImporter.swift */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.swift; path = HawkeyeCSVImporter.swift; sourceTree = "<group>"; };
+		8DABA8292F38E0000020EB72 /* AccountView.swift */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.swift; path = AccountView.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -193,6 +195,7 @@
 				8DABA8012F36A0500020EB72 /* ReportView.swift */,
 				8DABA8032F36A0500020EB72 /* ProfilesView.swift */,
 				8DABA8152F36B0000020EB72 /* SubscriptionRequiredView.swift */,
+				8DABA8292F38E0000020EB72 /* AccountView.swift */,
 			);
 			path = Views;
 			sourceTree = "<group>";
@@ -385,6 +388,7 @@
 				8DABA8022F36A0500020EB72 /* ProfilesView.swift in Sources */,
 				8DABA8142F36B0000020EB72 /* SubscriptionRequiredView.swift in Sources */,
 				8DABA8162F36B0000020EB72 /* SubscriptionService.swift in Sources */,
+				8DABA8282F38E0000020EB72 /* AccountView.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -543,7 +547,7 @@
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 13;
+				CURRENT_PROJECT_VERSION = 14;
 				DEVELOPMENT_ASSET_PATHS = "";
 				DEVELOPMENT_TEAM = FBG4AT9NN6;
 				ENABLE_PREVIEWS = YES;
@@ -574,7 +578,7 @@
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 13;
+				CURRENT_PROJECT_VERSION = 14;
 				DEVELOPMENT_ASSET_PATHS = "";
 				DEVELOPMENT_TEAM = FBG4AT9NN6;
 				ENABLE_PREVIEWS = YES;

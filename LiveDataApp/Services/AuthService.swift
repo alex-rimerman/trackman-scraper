@@ -91,8 +91,20 @@ class AuthService {
     
     // MARK: - Auth Endpoints
     
-    static func signup(email: String, name: String, password: String, accountType: String = "personal") async throws -> AuthResponse {
-        let body = SignupRequest(email: email, name: name, password: password, accountType: accountType)
+    static func signup(
+        email: String,
+        name: String,
+        password: String,
+        accountType: String = "personal",
+        revenuecatAppUserId: String? = nil
+    ) async throws -> AuthResponse {
+        let body = SignupRequest(
+            email: email,
+            name: name,
+            password: password,
+            accountType: accountType,
+            revenuecatAppUserId: revenuecatAppUserId
+        )
         let response: AuthResponse = try await post(endpoint: "/auth/signup", body: body)
         saveAuth(response)
         return response

@@ -17,6 +17,7 @@ from pydantic import BaseModel, Field
 from typing import Optional
 import numpy as np
 import dill
+import warnings
 import os
 import sys
 import sqlite3
@@ -25,10 +26,13 @@ import csv
 import io
 import tempfile
 import uuid
+import urllib.error
+import urllib.parse
+import urllib.request
 from datetime import datetime, timedelta, timezone
 from contextlib import contextmanager
 
-from trackman_parser import _spin_axis_from_movement, parse_trackman_pdf
+from trackman_parser import _spin_axis_from_movement, parse_trackman_pdf, parse_pitcher_hand_from_pdf
 
 from jose import jwt, JWTError
 import bcrypt
@@ -41,6 +45,12 @@ from slowapi.errors import RateLimitExceeded
 # ---------------------------------------------------------------------------
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+try:
+    from dotenv import load_dotenv
+
+    load_dotenv(os.path.join(os.path.dirname(os.path.abspath(__file__)), ".env"))
+except ImportError:
+    pass
 from modeling.aStuffPlusModel2 import aStuffPlusModel
 
 JWT_SECRET = os.environ.get("JWT_SECRET", "dev-secret-change-in-production-abc123")
@@ -55,6 +65,11 @@ JWT_EXPIRE_DAYS = 90
 REVENUECAT_WEBHOOK_SECRET = os.environ.get("REVENUECAT_WEBHOOK_SECRET", "")
 # When false/0, subscription gate is disabled; users can use the app without subscribing.
 SUBSCRIPTION_REQUIRED = os.environ.get("SUBSCRIPTION_REQUIRED", "0").lower() in ("1", "true", "yes")
+# When true, POST /auth/signup requires a verified RevenueCat subscriber (pay before account).
+SIGNUP_REQUIRES_PAYMENT = os.environ.get("SIGNUP_REQUIRES_PAYMENT", "1").lower() in ("1", "true", "yes")
+REVENUECAT_SECRET_API_KEY = os.environ.get("REVENUECAT_SECRET_API_KEY", "")
+# Entitlement identifier from RevenueCat dashboard (must match your project).
+REVENUECAT_ENTITLEMENT_ID = os.environ.get("REVENUECAT_ENTITLEMENT_ID", "premium")
 
 # CORS allowed origins
 ALLOWED_ORIGINS = os.environ.get("CORS_ORIGINS", "*").split(",")
@@ -116,7 +131,8 @@ def init_db():
                 subscription_status TEXT DEFAULT 'none',
                 subscription_plan TEXT,
                 subscription_expires_at TEXT,
-                revenuecat_app_user_id TEXT
+                revenuecat_app_user_id TEXT,
+                subscription_product_id TEXT
             )
         """)
         conn.execute("""
@@ -181,6 +197,7 @@ def migrate_db():
             ("subscription_plan", "NULL"),
             ("subscription_expires_at", "NULL"),
             ("revenuecat_app_user_id", "NULL"),
+            ("subscription_product_id", "NULL"),
         ]:
             try:
                 conn.execute(f"ALTER TABLE users ADD COLUMN {col} TEXT DEFAULT {default}")
@@ -307,8 +324,19 @@ def load_stuff_plus_model():
     dill._dill._reverse_typemap[
         "modeling.aStuffPlusModel.aStuffPlusModel"
     ] = "modeling.aStuffPlusModel2.aStuffPlusModel"
+    # Pickle embeds sklearn version from training; loading with a newer sklearn warns.
+    # Proper fix: re-export the model with the same sklearn you run in prod, or pin scikit-learn to that version.
+    try:
+        from sklearn.exceptions import InconsistentVersionWarning
+    except ImportError:
+        InconsistentVersionWarning = None  # type: ignore
     with open(MODEL_PATH, "rb") as f:
-        model_college = dill.load(f)
+        if InconsistentVersionWarning is not None:
+            with warnings.catch_warnings():
+                warnings.simplefilter("ignore", InconsistentVersionWarning)
+                model_college = dill.load(f)
+        else:
+            model_college = dill.load(f)
     model_college.predict_single_pitch = aStuffPlusModel.predict_single_pitch.__get__(
         model_college
     )
@@ -353,6 +381,8 @@ class SignupRequest(BaseModel):
     name: str
     password: str
     account_type: str = "personal"  # "personal" | "team"
+    # RevenueCat app user ID (anonymous ID before login). Required when SIGNUP_REQUIRES_PAYMENT=1.
+    revenuecat_app_user_id: Optional[str] = None
 
 class LoginRequest(BaseModel):
     email: str
@@ -450,6 +480,7 @@ class ParsedTrackmanPitch(BaseModel):
     tilt_string: Optional[str] = None
     stuff_plus: Optional[float] = None
     stuff_plus_raw: Optional[float] = None
+    pitcher_hand: str = "R"
 
 
 class SavedPitchResponse(BaseModel):
@@ -528,12 +559,88 @@ async def health_check():
 def _plan_from_product_id(product_id: str) -> Optional[str]:
     if not product_id:
         return None
-    pid = (product_id or "").strip()
-    if pid == "123" or "personal" in pid.lower():
+    pid = (product_id or "").strip().lower()
+    if pid == "123" or "personal" in pid:
         return "personal"
-    if pid in ("124", "125") or "team" in pid.lower():
+    if pid in ("124", "125") or "team" in pid:
         return "team"
     return None
+
+
+def _fetch_revenuecat_subscriber(app_user_id: str) -> Optional[dict]:
+    """GET /v1/subscribers/{app_user_id}. Returns None on 404."""
+    if not REVENUECAT_SECRET_API_KEY:
+        return None
+    safe = urllib.parse.quote(app_user_id, safe="")
+    url = f"https://api.revenuecat.com/v1/subscribers/{safe}"
+    req = urllib.request.Request(url, headers={"Authorization": f"Bearer {REVENUECAT_SECRET_API_KEY}"})
+    try:
+        with urllib.request.urlopen(req, timeout=20) as resp:
+            return json.loads(resp.read().decode())
+    except urllib.error.HTTPError as e:
+        if e.code == 404:
+            return None
+        raise HTTPException(status_code=502, detail="RevenueCat API error") from e
+    except urllib.error.URLError as e:
+        raise HTTPException(status_code=502, detail="Could not reach RevenueCat") from e
+
+
+def _parse_rc_expires(expires_date: Optional[str]) -> Optional[datetime]:
+    if not expires_date:
+        return None
+    try:
+        s = expires_date.replace("Z", "+00:00")
+        dt = datetime.fromisoformat(s)
+        if dt.tzinfo is None:
+            dt = dt.replace(tzinfo=timezone.utc)
+        return dt
+    except (ValueError, TypeError):
+        return None
+
+
+def _verify_revenuecat_subscription_for_signup(
+    app_user_id: str, expected_account_type: str
+) -> tuple[str, str, Optional[str], str]:
+    """
+    Returns (user_id, subscription_plan, subscription_expires_at_iso, product_id).
+    """
+    data = _fetch_revenuecat_subscriber(app_user_id)
+    if not data:
+        raise HTTPException(
+            status_code=400,
+            detail="Could not verify subscription. Purchase the plan in the app, then try again.",
+        )
+    subscriber = (data.get("subscriber") or {})
+    entitlements = subscriber.get("entitlements") or {}
+    ent = entitlements.get(REVENUECAT_ENTITLEMENT_ID)
+    if not ent and entitlements:
+        ent = next(iter(entitlements.values()))
+    if not ent:
+        raise HTTPException(status_code=400, detail="No active subscription found for this purchase.")
+
+    product_id = (ent.get("product_identifier") or "").strip()
+    plan = _plan_from_product_id(product_id)
+    if not plan:
+        raise HTTPException(status_code=400, detail="Unknown subscription product. Contact support.")
+
+    if plan != expected_account_type:
+        raise HTTPException(
+            status_code=400,
+            detail=f"This subscription is for a {plan} plan. Change account type or purchase the matching plan.",
+        )
+
+    expires_date = ent.get("expires_date")
+    # null expires_date = still active (e.g. intro) per RC; treat as active
+    if expires_date is None:
+        return app_user_id, plan, None, product_id
+
+    exp_dt = _parse_rc_expires(expires_date)
+    if exp_dt is None:
+        raise HTTPException(status_code=400, detail="Invalid subscription expiration from store.")
+    if exp_dt <= datetime.now(timezone.utc):
+        raise HTTPException(status_code=400, detail="Subscription has expired. Renew to create an account.")
+
+    return app_user_id, plan, exp_dt.isoformat(), product_id
 
 
 @app.post("/webhooks/revenuecat")
@@ -573,8 +680,9 @@ async def webhook_revenuecat(request: Request):
         if event_type in ("INITIAL_PURCHASE", "RENEWAL", "UNCANCELLATION", "SUBSCRIPTION_EXTENDED", "TEMPORARY_ENTITLEMENT_GRANT"):
             conn.execute(
                 """UPDATE users SET subscription_status = 'active', subscription_plan = ?,
-                   subscription_expires_at = ?, revenuecat_app_user_id = ? WHERE id = ?""",
-                (plan or "personal", subscription_expires_at, app_user_id, app_user_id),
+                   subscription_expires_at = ?, revenuecat_app_user_id = ?, subscription_product_id = ?
+                   WHERE id = ?""",
+                (plan or "personal", subscription_expires_at, app_user_id, product_id or None, app_user_id),
             )
         elif event_type in ("CANCELLATION", "EXPIRATION"):
             conn.execute(
@@ -596,18 +704,71 @@ async def signup(request: Request, req: SignupRequest):
     if account_type not in ("personal", "team"):
         account_type = "personal"
 
-    user_id = str(uuid.uuid4())
+    rc_id = (req.revenuecat_app_user_id or "").strip()
+    subscription_expires_at: Optional[str] = None
+    subscription_status = "none"
+    is_subscribed_response = False
+    verified_product_id: Optional[str] = None
+
+    if SIGNUP_REQUIRES_PAYMENT:
+        if not rc_id:
+            raise HTTPException(
+                status_code=400,
+                detail="Subscribe in the app first, then create your account.",
+            )
+        if not REVENUECAT_SECRET_API_KEY:
+            raise HTTPException(
+                status_code=503,
+                detail="Subscription verification is not configured on the server.",
+            )
+        user_id, verified_plan, subscription_expires_at, verified_product_id = _verify_revenuecat_subscription_for_signup(
+            rc_id, account_type
+        )
+        if verified_plan != account_type:
+            account_type = verified_plan
+        subscription_status = "active"
+        is_subscribed_response = True
+    else:
+        user_id = str(uuid.uuid4())
+
     hashed = hash_password(req.password)
     now = datetime.now(timezone.utc).isoformat()
     default_profile_id = None
+
+    sub_plan: Optional[str] = account_type if SIGNUP_REQUIRES_PAYMENT else None
+    sub_expires: Optional[str] = subscription_expires_at if SIGNUP_REQUIRES_PAYMENT else None
+    rc_col: Optional[str] = user_id if SIGNUP_REQUIRES_PAYMENT else None
+    sub_product_id: Optional[str] = verified_product_id if SIGNUP_REQUIRES_PAYMENT else None
 
     with get_db() as conn:
         existing = conn.execute("SELECT id FROM users WHERE email = ?", (req.email.lower(),)).fetchone()
         if existing:
             raise HTTPException(status_code=409, detail="An account with this email already exists")
+        if SIGNUP_REQUIRES_PAYMENT:
+            taken = conn.execute("SELECT id FROM users WHERE id = ?", (user_id,)).fetchone()
+            if taken:
+                raise HTTPException(
+                    status_code=409,
+                    detail="An account already exists for this purchase. Try logging in instead.",
+                )
         conn.execute(
-            "INSERT INTO users (id, email, name, password_hash, account_type, created_at, subscription_status) VALUES (?, ?, ?, ?, ?, ?, ?)",
-            (user_id, req.email.lower(), req.name.strip(), hashed, account_type, now, "none"),
+            """INSERT INTO users (id, email, name, password_hash, account_type, created_at,
+               subscription_status, subscription_plan, subscription_expires_at, revenuecat_app_user_id,
+               subscription_product_id)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+            (
+                user_id,
+                req.email.lower(),
+                req.name.strip(),
+                hashed,
+                account_type,
+                now,
+                subscription_status,
+                sub_plan,
+                sub_expires,
+                rc_col,
+                sub_product_id,
+            ),
         )
         if account_type == "personal":
             profile_id = str(uuid.uuid4())
@@ -620,9 +781,14 @@ async def signup(request: Request, req: SignupRequest):
 
     token = create_token(user_id, req.email.lower())
     return AuthResponse(
-        token=token, user_id=user_id, email=req.email.lower(), name=req.name.strip(),
-        account_type=account_type, default_profile_id=default_profile_id,
-        is_subscribed=False, subscription_expires_at=None,
+        token=token,
+        user_id=user_id,
+        email=req.email.lower(),
+        name=req.name.strip(),
+        account_type=account_type,
+        default_profile_id=default_profile_id,
+        is_subscribed=is_subscribed_response,
+        subscription_expires_at=subscription_expires_at,
     )
 
 
@@ -690,7 +856,8 @@ async def get_me(payload: dict = Depends(verify_token)):
     with get_db() as conn:
         user = conn.execute(
             """SELECT id, email, name, account_type, created_at,
-                      subscription_status, subscription_expires_at FROM users WHERE id = ?""",
+                      subscription_status, subscription_plan, subscription_expires_at,
+                      subscription_product_id FROM users WHERE id = ?""",
             (payload["sub"],),
         ).fetchone()
     if not user:
@@ -726,6 +893,9 @@ async def get_me(payload: dict = Depends(verify_token)):
         "account_type": account_type,
         "default_profile_id": default_profile_id,
         "is_subscribed": is_subscribed,
+        "subscription_status": status,
+        "subscription_plan": user["subscription_plan"],
+        "subscription_product_id": user["subscription_product_id"],
         "subscription_expires_at": expires_at,
     }
 
@@ -1029,9 +1199,10 @@ INCH_TO_FT = 1.0 / 12.0
 async def parse_trackman_pdf_endpoint(
     request: Request,
     file: UploadFile = File(...),
+    pitcher_hand: Optional[str] = Form(None),
     payload: dict = Depends(require_subscription),
 ):
-    """Parse Trackman PDF using color tags for pitch type (same logic as trackman_pdf_parser). Returns per-pitch data."""
+    """Parse Trackman PDF using color tags for pitch type. Optional pitcher_hand (L/R); if omitted, inferred from PDF."""
     if not file.filename or not file.filename.lower().endswith(".pdf"):
         raise HTTPException(status_code=400, detail="PDF file required")
     content = await file.read()
@@ -1042,6 +1213,9 @@ async def parse_trackman_pdf_endpoint(
         tmp_path = tmp.name
     try:
         pitches = parse_trackman_pdf(tmp_path)
+        hand = (pitcher_hand or "").strip().upper()
+        if hand not in ("L", "R"):
+            hand = parse_pitcher_hand_from_pdf(tmp_path, pitches=pitches)
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
     finally:
@@ -1078,7 +1252,7 @@ async def parse_trackman_pdf_endpoint(
             try:
                 stuff_plus_raw = _run_prediction(
                     pt, velo, pfx_x, pfx_z, ext, spin, spin_axis,
-                    -rels, relh, "R", fb_velo, fb_ivb, fb_hmov,
+                    -rels, relh, hand, fb_velo, fb_ivb, fb_hmov,
                 )
                 stuff_plus = round(stuff_plus_raw, 1)
             except Exception:
@@ -1097,6 +1271,7 @@ async def parse_trackman_pdf_endpoint(
             tilt_string=p.get("tilt_string"),
             stuff_plus=stuff_plus,
             stuff_plus_raw=stuff_plus_raw,
+            pitcher_hand=hand,
         ))
     return result
 

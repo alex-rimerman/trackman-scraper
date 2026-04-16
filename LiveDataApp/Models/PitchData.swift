@@ -284,6 +284,33 @@ struct StuffPlusResponse: Codable {
 }
 
 // MARK: - Error Response
+/// FastAPI may return `detail` as a string (HTTPException) or as an array of validation errors (422).
 struct ErrorResponse: Codable {
     let detail: String
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        if let s = try? c.decode(String.self, forKey: .detail) {
+            detail = s
+            return
+        }
+        if let items = try? c.decode([FastAPIValidationItem].self, forKey: .detail) {
+            detail = items.map(\.msg).joined(separator: " ")
+            return
+        }
+        detail = "Request failed"
+    }
+
+    func encode(to encoder: Encoder) throws {
+        var c = encoder.container(keyedBy: CodingKeys.self)
+        try c.encode(detail, forKey: .detail)
+    }
+
+    enum CodingKeys: String, CodingKey {
+        case detail
+    }
+
+    private struct FastAPIValidationItem: Decodable {
+        let msg: String
+    }
 }
