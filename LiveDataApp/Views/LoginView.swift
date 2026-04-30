@@ -232,6 +232,11 @@ struct LoginView: View {
             .scrollDismissesKeyboard(.interactively)
         }
         .preferredColorScheme(.dark)
+        .task {
+            if SubscriptionService.signupRequiresPayment {
+                SubscriptionService.logDiagnostics()
+            }
+        }
     }
 
     private var showSignupPaywall: Bool {

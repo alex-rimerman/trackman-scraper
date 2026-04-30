@@ -36,7 +36,7 @@
               "locale" : "en_US"
             }
           ],
-          "productID" : "livedata_personal_monthly",
+          "productID" : "123",
           "recurringSubscriptionPeriod" : "P1M",
           "referenceName" : "Personal Monthly",
           "subscriptionGroupID" : "livedata_pro_group",
@@ -61,7 +61,7 @@
               "locale" : "en_US"
             }
           ],
-          "productID" : "livedata_personal_annual",
+          "productID" : "personal_yearly",
           "recurringSubscriptionPeriod" : "P1Y",
           "referenceName" : "Personal Yearly",
           "subscriptionGroupID" : "livedata_pro_group",
@@ -86,7 +86,7 @@
               "locale" : "en_US"
             }
           ],
-          "productID" : "livedata_team_monthly",
+          "productID" : "125",
           "recurringSubscriptionPeriod" : "P1M",
           "referenceName" : "Team Monthly",
           "subscriptionGroupID" : "livedata_pro_group",
@@ -111,7 +111,7 @@
               "locale" : "en_US"
             }
           ],
-          "productID" : "livedata_team_annual",
+          "productID" : "team_yearly",
           "recurringSubscriptionPeriod" : "P1Y",
           "referenceName" : "Team Yearly",
           "subscriptionGroupID" : "livedata_pro_group",

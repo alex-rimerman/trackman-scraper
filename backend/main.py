@@ -70,6 +70,16 @@ SIGNUP_REQUIRES_PAYMENT = os.environ.get("SIGNUP_REQUIRES_PAYMENT", "1").lower()
 REVENUECAT_SECRET_API_KEY = os.environ.get("REVENUECAT_SECRET_API_KEY", "")
 # Entitlement identifier from RevenueCat dashboard (must match your project).
 REVENUECAT_ENTITLEMENT_ID = os.environ.get("REVENUECAT_ENTITLEMENT_ID", "premium")
+# Comma-separated emails that bypass the paywall (subscription_status auto-active, no expiry).
+GRANDFATHERED_EMAILS = {
+    e.strip().lower()
+    for e in os.environ.get("GRANDFATHERED_EMAILS", "").split(",")
+    if e.strip()
+}
+
+
+def _is_grandfathered(email: Optional[str]) -> bool:
+    return bool(email) and email.strip().lower() in GRANDFATHERED_EMAILS
 
 # CORS allowed origins
 ALLOWED_ORIGINS = os.environ.get("CORS_ORIGINS", "*").split(",")
@@ -277,11 +287,13 @@ def require_subscription(payload: dict = Depends(verify_token)):
     user_id = payload["sub"]
     with get_db() as conn:
         row = conn.execute(
-            """SELECT subscription_status, subscription_expires_at FROM users WHERE id = ?""",
+            """SELECT email, subscription_status, subscription_expires_at FROM users WHERE id = ?""",
             (user_id,),
         ).fetchone()
     if not row:
         raise HTTPException(status_code=404, detail="User not found")
+    if _is_grandfathered(row["email"]):
+        return payload
     status = (row["subscription_status"] or "none").lower()
     expires_at = row["subscription_expires_at"]
     if status != "active":
@@ -709,8 +721,9 @@ async def signup(request: Request, req: SignupRequest):
     subscription_status = "none"
     is_subscribed_response = False
     verified_product_id: Optional[str] = None
+    grandfathered = _is_grandfathered(req.email)
 
-    if SIGNUP_REQUIRES_PAYMENT:
+    if SIGNUP_REQUIRES_PAYMENT and not grandfathered:
         if not rc_id:
             raise HTTPException(
                 status_code=400,
@@ -728,23 +741,28 @@ async def signup(request: Request, req: SignupRequest):
             account_type = verified_plan
         subscription_status = "active"
         is_subscribed_response = True
+        store_rc_id = True
     else:
         user_id = str(uuid.uuid4())
+        store_rc_id = False
+        if grandfathered:
+            subscription_status = "active"
+            is_subscribed_response = True
 
     hashed = hash_password(req.password)
     now = datetime.now(timezone.utc).isoformat()
     default_profile_id = None
 
-    sub_plan: Optional[str] = account_type if SIGNUP_REQUIRES_PAYMENT else None
-    sub_expires: Optional[str] = subscription_expires_at if SIGNUP_REQUIRES_PAYMENT else None
-    rc_col: Optional[str] = user_id if SIGNUP_REQUIRES_PAYMENT else None
-    sub_product_id: Optional[str] = verified_product_id if SIGNUP_REQUIRES_PAYMENT else None
+    sub_plan: Optional[str] = account_type if (SIGNUP_REQUIRES_PAYMENT and not grandfathered) or grandfathered else None
+    sub_expires: Optional[str] = subscription_expires_at if (SIGNUP_REQUIRES_PAYMENT and not grandfathered) else None
+    rc_col: Optional[str] = user_id if store_rc_id else None
+    sub_product_id: Optional[str] = verified_product_id if (SIGNUP_REQUIRES_PAYMENT and not grandfathered) else None
 
     with get_db() as conn:
         existing = conn.execute("SELECT id FROM users WHERE email = ?", (req.email.lower(),)).fetchone()
         if existing:
             raise HTTPException(status_code=409, detail="An account with this email already exists")
-        if SIGNUP_REQUIRES_PAYMENT:
+        if store_rc_id:
             taken = conn.execute("SELECT id FROM users WHERE id = ?", (user_id,)).fetchone()
             if taken:
                 raise HTTPException(
@@ -812,7 +830,21 @@ async def login(request: Request, req: LoginRequest):
     status = (sub["subscription_status"] or "none").lower() if sub else "none"
     expires_at = sub["subscription_expires_at"] if sub else None
     is_subscribed = False
-    if status == "active" and expires_at:
+    if _is_grandfathered(user["email"]):
+        if status != "active" or expires_at is not None:
+            with get_db() as conn:
+                conn.execute(
+                    """UPDATE users SET subscription_status = 'active',
+                       subscription_expires_at = NULL,
+                       subscription_plan = COALESCE(subscription_plan, ?)
+                       WHERE id = ?""",
+                    (user["account_type"] or "personal", user["id"]),
+                )
+                conn.commit()
+        status = "active"
+        expires_at = None
+        is_subscribed = True
+    elif status == "active" and expires_at:
         try:
             exp = datetime.fromisoformat(expires_at.replace("Z", "+00:00"))
             if exp.tzinfo is None:
@@ -874,8 +906,15 @@ async def get_me(payload: dict = Depends(verify_token)):
                 default_profile_id = profile["id"]
     status = (user["subscription_status"] or "none").lower()
     expires_at = user["subscription_expires_at"]
+    plan = user["subscription_plan"]
+    product_id = user["subscription_product_id"]
     is_subscribed = False
-    if status == "active":
+    if _is_grandfathered(user["email"]):
+        status = "active"
+        expires_at = None
+        plan = plan or account_type
+        is_subscribed = True
+    elif status == "active":
         if not expires_at:
             is_subscribed = True
         else:
@@ -894,8 +933,8 @@ async def get_me(payload: dict = Depends(verify_token)):
         "default_profile_id": default_profile_id,
         "is_subscribed": is_subscribed,
         "subscription_status": status,
-        "subscription_plan": user["subscription_plan"],
-        "subscription_product_id": user["subscription_product_id"],
+        "subscription_plan": plan,
+        "subscription_product_id": product_id,
         "subscription_expires_at": expires_at,
     }
 

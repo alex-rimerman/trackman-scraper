@@ -11,7 +11,9 @@ enum SubscriptionBillingPeriod: String, CaseIterable {
 final class SubscriptionService {
 
     /// When true, app requires active subscription to access main content.
-    static var subscriptionRequired: Bool = false
+    /// Existing (unsubscribed) users will be shown the in-app paywall after login.
+    /// Grandfathered emails are marked active by the server, so they bypass this gate.
+    static var subscriptionRequired: Bool = true
 
     /// When true, new accounts require an in-app subscription before signup (matches backend SIGNUP_REQUIRES_PAYMENT).
     static var signupRequiresPayment: Bool {
@@ -21,15 +23,13 @@ final class SubscriptionService {
         return true
     }
 
-    /// App Store product identifiers — configure the same IDs in App Store Connect and RevenueCat.
+    /// App Store product identifiers. These must match Product IDs in App Store Connect
+    /// (and the products in RevenueCat). The monthly IDs are legacy ("123" / "125").
     enum ProductID {
-        static let personalMonthly = "livedata_personal_monthly"
-        static let personalAnnual = "livedata_personal_annual"
-        static let teamMonthly = "livedata_team_monthly"
-        static let teamAnnual = "livedata_team_annual"
-        /// Legacy placeholders (remove when store products are fully migrated).
-        static let legacyPersonal = "123"
-        static let legacyTeam = "125"
+        static let personalMonthly = "123"
+        static let personalAnnual = "personal_yearly"
+        static let teamMonthly = "125"
+        static let teamAnnual = "team_yearly"
     }
 
     static func productId(accountType: String, period: SubscriptionBillingPeriod) -> String {
@@ -58,9 +58,9 @@ final class SubscriptionService {
         let team = accountType == "team"
         let pid = (productId ?? "").lowercased()
         switch pid {
-        case ProductID.personalMonthly, "123": return "Personal · Monthly"
+        case ProductID.personalMonthly: return "Personal · Monthly"
         case ProductID.personalAnnual: return "Personal · Yearly"
-        case ProductID.teamMonthly, "125": return "Team · Monthly"
+        case ProductID.teamMonthly: return "Team · Monthly"
         case ProductID.teamAnnual: return "Team · Yearly"
         default:
             if pid.contains("team") { return "Team" }
@@ -99,16 +99,83 @@ final class SubscriptionService {
         }
     }
 
-    /// Purchase by product identifier (async).
+    /// Purchase by product identifier (async). Falls back to RevenueCat offerings, and
+    /// surfaces a useful error when the App Store does not return the product.
     func purchaseAsync(productId: String) async throws {
+        // 1. Direct product fetch.
         let products = await Purchases.shared.products([productId])
-        guard let product = products.first else {
-            throw PurchaseError(message: "Product not found")
+        if let product = products.first {
+            do {
+                _ = try await Purchases.shared.purchase(product: product)
+                return
+            } catch {
+                throw PurchaseError(message: error.localizedDescription)
+            }
         }
+
+        // 2. Fallback: search RevenueCat offerings (covers cases where products are
+        // configured via offerings only). Also gives us a list to diagnose mismatches.
         do {
-            _ = try await Purchases.shared.purchase(product: product)
+            let offerings = try await Purchases.shared.offerings()
+            var matched: Package?
+            var knownIds = Set<String>()
+            for (_, offering) in offerings.all {
+                for pkg in offering.availablePackages {
+                    let id = pkg.storeProduct.productIdentifier
+                    knownIds.insert(id)
+                    if id == productId { matched = pkg }
+                }
+            }
+            if let pkg = matched {
+                do {
+                    _ = try await Purchases.shared.purchase(package: pkg)
+                    return
+                } catch {
+                    throw PurchaseError(message: error.localizedDescription)
+                }
+            }
+
+            let summary: String
+            if knownIds.isEmpty {
+                summary = "App Store returned no subscriptions for this build. Check Paid Apps agreement (App Store Connect → Agreements, Tax, and Banking) and that all four subscriptions are in Ready to Submit / Approved with Product IDs that match \(ProductID.personalMonthly), \(ProductID.personalAnnual), \(ProductID.teamMonthly), \(ProductID.teamAnnual)."
+            } else {
+                summary = "Looking for \"\(productId)\". App Store offered: \(knownIds.sorted().joined(separator: ", ")). Rename the subscription in App Store Connect or update the app to match."
+            }
+            throw PurchaseError(message: summary)
+        } catch let err as PurchaseError {
+            throw err
         } catch {
-            throw PurchaseError(message: error.localizedDescription)
+            throw PurchaseError(message: "App Store unavailable: \(error.localizedDescription)")
+        }
+    }
+
+    /// Print a one-time diagnostic: RevenueCat config + which products App Store will sell.
+    /// Call from the paywall so it shows up in TestFlight logs.
+    static func logDiagnostics() {
+        Task {
+            print("[SubscriptionService] bundle:", Bundle.main.bundleIdentifier ?? "?")
+            print("[SubscriptionService] RC appUserID:", Purchases.shared.appUserID)
+            let ids = [
+                ProductID.personalMonthly,
+                ProductID.personalAnnual,
+                ProductID.teamMonthly,
+                ProductID.teamAnnual,
+            ]
+            let products = await Purchases.shared.products(ids)
+            print("[SubscriptionService] App Store returned \(products.count) of \(ids.count) products:")
+            for p in products {
+                print(" - \(p.productIdentifier) — \(p.localizedPriceString)")
+            }
+            do {
+                let offerings = try await Purchases.shared.offerings()
+                print("[SubscriptionService] Offerings (\(offerings.all.count)):")
+                for (key, offering) in offerings.all {
+                    let pkgs = offering.availablePackages.map { $0.storeProduct.productIdentifier }.joined(separator: ", ")
+                    print("  • \(key): \(pkgs.isEmpty ? "(no packages)" : pkgs)")
+                }
+            } catch {
+                print("[SubscriptionService] offerings error:", error.localizedDescription)
+            }
         }
     }
 
