@@ -43,17 +43,20 @@ struct SubscriptionRequiredView: View {
                         .font(.system(size: 48))
                         .foregroundColor(Color(red: 0.53, green: 0.81, blue: 0.92))
 
-                    Text("Unlock Pro Baseball Analytics")
+                    Text("Arsenal IQ Pro Subscription")
                         .font(.system(size: 24, weight: .bold, design: .rounded))
                         .foregroundColor(.white)
                         .multilineTextAlignment(.center)
                         .padding(.horizontal)
 
-                    Text("Subscribe to save pitches, run Stuff+ analysis, and build reports.")
+                    Text("Save pitches, run Stuff+ analysis, and build pitcher profiles.")
                         .font(.system(size: 15))
                         .foregroundColor(.white.opacity(0.8))
                         .multilineTextAlignment(.center)
                         .padding(.horizontal)
+
+                    featureList
+                        .padding(.horizontal, 24)
 
                     VStack(spacing: 12) {
                         HStack(spacing: 0) {
@@ -105,7 +108,7 @@ struct SubscriptionRequiredView: View {
                                     .progressViewStyle(CircularProgressViewStyle(tint: .white))
                                     .padding(.trailing, 8)
                             }
-                            Text("Continue")
+                            Text(continueButtonTitle)
                                 .font(.system(size: 18, weight: .semibold))
                         }
                         .foregroundColor(.white)
@@ -120,6 +123,14 @@ struct SubscriptionRequiredView: View {
                     .padding(.horizontal, 24)
                     .padding(.top, 8)
 
+                    Text(LegalURLs.autoRenewDisclosure)
+                        .font(.system(size: 11))
+                        .foregroundColor(.white.opacity(0.65))
+                        .multilineTextAlignment(.center)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .padding(.horizontal, 24)
+                        .padding(.top, 4)
+
                     VStack(spacing: 12) {
                         Button {
                             Task { @MainActor in await restorePurchases() }
@@ -133,14 +144,12 @@ struct SubscriptionRequiredView: View {
                         .disabled(isPurchasing)
 
                         HStack(spacing: 16) {
-                            Button("Terms") { /* TODO: open terms URL */ }
+                            Link("Terms of Use (EULA)", destination: LegalURLs.termsOfUse)
                                 .font(.system(size: 13))
-                                .foregroundColor(.white.opacity(0.7))
-                                .buttonStyle(.plain)
-                            Button("Privacy") { /* TODO: open privacy URL */ }
+                                .foregroundColor(.white.opacity(0.85))
+                            Link("Privacy Policy", destination: LegalURLs.privacyPolicy)
                                 .font(.system(size: 13))
-                                .foregroundColor(.white.opacity(0.7))
-                                .buttonStyle(.plain)
+                                .foregroundColor(.white.opacity(0.85))
                         }
 
                         Button {
@@ -178,18 +187,20 @@ struct SubscriptionRequiredView: View {
 
     private func planCard(_ plan: SubscriptionPlan) -> some View {
         let isSelected = selectedPlan == plan
+        let title = SubscriptionTitle.title(accountType: plan.rawValue, period: billingPeriod)
+        let length = billingPeriod == .yearly ? "1 year" : "1 month"
         return Button(action: { selectedPlan = plan }) {
             HStack {
                 Image(systemName: isSelected ? "checkmark.circle.fill" : "circle")
                     .font(.system(size: 22))
                     .foregroundColor(isSelected ? Color(red: 0.53, green: 0.81, blue: 0.92) : .white.opacity(0.5))
-                VStack(alignment: .leading, spacing: 2) {
-                    Text(plan.title)
-                        .font(.system(size: 17, weight: .semibold))
+                VStack(alignment: .leading, spacing: 4) {
+                    Text(title)
+                        .font(.system(size: 16, weight: .semibold))
                         .foregroundColor(.white)
-                    Text(plan.priceHint(for: billingPeriod))
-                        .font(.system(size: 14))
-                        .foregroundColor(.white.opacity(0.8))
+                    Text("\(length) · \(plan.priceHint(for: billingPeriod))")
+                        .font(.system(size: 13))
+                        .foregroundColor(.white.opacity(0.85))
                 }
                 Spacer()
             }
@@ -203,6 +214,31 @@ struct SubscriptionRequiredView: View {
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
+    }
+
+    private var continueButtonTitle: String {
+        let price = selectedPlan.priceHint(for: billingPeriod)
+        return "Subscribe — \(price)"
+    }
+
+    private var featureList: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            ForEach(SubscriptionTitle.features, id: \.self) { feature in
+                HStack(alignment: .top, spacing: 10) {
+                    Image(systemName: "checkmark.circle.fill")
+                        .font(.system(size: 14))
+                        .foregroundColor(Color(red: 0.53, green: 0.81, blue: 0.92))
+                    Text(feature)
+                        .font(.system(size: 13))
+                        .foregroundColor(.white.opacity(0.9))
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(14)
+        .background(Color.white.opacity(0.06))
+        .cornerRadius(12)
     }
 
     private func purchaseSelected() async {

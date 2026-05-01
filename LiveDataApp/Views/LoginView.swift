@@ -251,15 +251,33 @@ struct LoginView: View {
 
     private var signupPaywallSection: some View {
         VStack(alignment: .leading, spacing: 16) {
-            Text("Subscribe to create an account")
-                .font(.system(size: 15, weight: .semibold))
+            Text("Arsenal IQ Pro Subscription")
+                .font(.system(size: 17, weight: .bold))
                 .foregroundColor(.white)
                 .frame(maxWidth: .infinity, alignment: .leading)
 
-            Text("Choose plan and billing. After Apple confirms payment, you’ll enter your name, email, and password.")
+            Text("Subscribe to create your account. After Apple confirms payment, you'll enter your name, email, and password.")
                 .font(.system(size: 13))
                 .foregroundColor(.white.opacity(0.75))
                 .fixedSize(horizontal: false, vertical: true)
+
+            VStack(alignment: .leading, spacing: 8) {
+                ForEach(SubscriptionTitle.features, id: \.self) { feature in
+                    HStack(alignment: .top, spacing: 10) {
+                        Image(systemName: "checkmark.circle.fill")
+                            .font(.system(size: 14))
+                            .foregroundColor(Color(red: 0.53, green: 0.81, blue: 0.92))
+                        Text(feature)
+                            .font(.system(size: 13))
+                            .foregroundColor(.white.opacity(0.9))
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                }
+            }
+            .padding(12)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(Color.white.opacity(0.06))
+            .cornerRadius(12)
 
             VStack(alignment: .leading, spacing: 8) {
                 Text("Account type")
@@ -325,9 +343,29 @@ struct LoginView: View {
                 .cornerRadius(12)
             }
 
-            Text(SubscriptionService.priceHint(accountType: authViewModel.accountType, period: authViewModel.signupBillingPeriod))
-                .font(.system(size: 14, weight: .medium))
-                .foregroundColor(Color(red: 0.53, green: 0.81, blue: 0.92))
+            HStack {
+                Text(SubscriptionTitle.title(accountType: authViewModel.accountType, period: authViewModel.signupBillingPeriod))
+                    .font(.system(size: 14, weight: .semibold))
+                    .foregroundColor(.white)
+                Spacer()
+                Text("\(authViewModel.signupBillingPeriod == .yearly ? "1 year" : "1 month") · \(SubscriptionService.priceHint(accountType: authViewModel.accountType, period: authViewModel.signupBillingPeriod))")
+                    .font(.system(size: 14, weight: .medium))
+                    .foregroundColor(Color(red: 0.53, green: 0.81, blue: 0.92))
+            }
+
+            Text(LegalURLs.autoRenewDisclosure)
+                .font(.system(size: 11))
+                .foregroundColor(.white.opacity(0.65))
+                .fixedSize(horizontal: false, vertical: true)
+
+            HStack(spacing: 16) {
+                Link("Terms of Use (EULA)", destination: LegalURLs.termsOfUse)
+                    .font(.system(size: 12))
+                    .foregroundColor(.white.opacity(0.85))
+                Link("Privacy Policy", destination: LegalURLs.privacyPolicy)
+                    .font(.system(size: 12))
+                    .foregroundColor(.white.opacity(0.85))
+            }
         }
     }
 

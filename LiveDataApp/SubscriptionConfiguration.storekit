@@ -1,5 +1,5 @@
 {
-  "identifier" : "LiveDataSubscriptions",
+  "identifier" : "ArsenalIQSubscriptions",
   "nonRenewingSubscriptions" : [
 
   ],
@@ -11,11 +11,15 @@
   },
   "subscriptionGroups" : [
     {
-      "id" : "livedata_pro_group",
+      "id" : "arsenal_iq_pro_group",
       "localizations" : [
-
+        {
+          "description" : "Arsenal IQ Pro unlocks unlimited Trackman pitch capture, Stuff+ grades, full pitch metrics, saved pitcher profiles, and league-percentile reports.",
+          "displayName" : "Arsenal IQ Pro",
+          "locale" : "en_US"
+        }
       ],
-      "name" : "LiveData Pro",
+      "name" : "Arsenal IQ Pro",
       "subscriptions" : [
         {
           "adHocOffers" : [
@@ -24,22 +28,22 @@
           "codeOffers" : [
 
           ],
-          "displayPrice" : "4.99",
+          "displayPrice" : "5.00",
           "familyShareable" : false,
           "groupNumber" : 1,
           "internalID" : "A001",
           "introductoryOffer" : null,
           "localizations" : [
             {
-              "description" : "Personal monthly subscription",
-              "displayName" : "Personal Monthly",
+              "description" : "Arsenal IQ Personal — unlimited Trackman pitch capture, Stuff+ grades, full pitch metrics, and saved pitcher profiles. Billed monthly.",
+              "displayName" : "Arsenal IQ Personal Monthly",
               "locale" : "en_US"
             }
           ],
-          "productID" : "123",
+          "productID" : "com.developingbaseball.arsenaliq.personal.monthly",
           "recurringSubscriptionPeriod" : "P1M",
-          "referenceName" : "Personal Monthly",
-          "subscriptionGroupID" : "livedata_pro_group",
+          "referenceName" : "Arsenal IQ Personal Monthly",
+          "subscriptionGroupID" : "arsenal_iq_pro_group",
           "type" : "RecurringSubscription"
         },
         {
@@ -49,22 +53,22 @@
           "codeOffers" : [
 
           ],
-          "displayPrice" : "49.99",
+          "displayPrice" : "50.00",
           "familyShareable" : false,
           "groupNumber" : 2,
           "internalID" : "A002",
           "introductoryOffer" : null,
           "localizations" : [
             {
-              "description" : "Personal annual subscription",
-              "displayName" : "Personal Yearly",
+              "description" : "Arsenal IQ Personal — unlimited Trackman pitch capture, Stuff+ grades, full pitch metrics, and saved pitcher profiles. Billed yearly (save vs monthly).",
+              "displayName" : "Arsenal IQ Personal Yearly",
               "locale" : "en_US"
             }
           ],
-          "productID" : "personal_yearly",
+          "productID" : "com.developingbaseball.arsenaliq.personal.yearly",
           "recurringSubscriptionPeriod" : "P1Y",
-          "referenceName" : "Personal Yearly",
-          "subscriptionGroupID" : "livedata_pro_group",
+          "referenceName" : "Arsenal IQ Personal Yearly",
+          "subscriptionGroupID" : "arsenal_iq_pro_group",
           "type" : "RecurringSubscription"
         },
         {
@@ -74,22 +78,22 @@
           "codeOffers" : [
 
           ],
-          "displayPrice" : "29.99",
+          "displayPrice" : "30.00",
           "familyShareable" : false,
           "groupNumber" : 3,
           "internalID" : "A003",
           "introductoryOffer" : null,
           "localizations" : [
             {
-              "description" : "Team monthly subscription",
-              "displayName" : "Team Monthly",
+              "description" : "Arsenal IQ Team — everything in Personal plus shared pitcher profiles for an entire staff. Billed monthly.",
+              "displayName" : "Arsenal IQ Team Monthly",
               "locale" : "en_US"
             }
           ],
-          "productID" : "125",
+          "productID" : "com.developingbaseball.arsenaliq.team.monthly",
           "recurringSubscriptionPeriod" : "P1M",
-          "referenceName" : "Team Monthly",
-          "subscriptionGroupID" : "livedata_pro_group",
+          "referenceName" : "Arsenal IQ Team Monthly",
+          "subscriptionGroupID" : "arsenal_iq_pro_group",
           "type" : "RecurringSubscription"
         },
         {
@@ -99,22 +103,22 @@
           "codeOffers" : [
 
           ],
-          "displayPrice" : "299.99",
+          "displayPrice" : "300.00",
           "familyShareable" : false,
           "groupNumber" : 4,
           "internalID" : "A004",
           "introductoryOffer" : null,
           "localizations" : [
             {
-              "description" : "Team annual subscription",
-              "displayName" : "Team Yearly",
+              "description" : "Arsenal IQ Team — everything in Personal plus shared pitcher profiles for an entire staff. Billed yearly (save vs monthly).",
+              "displayName" : "Arsenal IQ Team Yearly",
               "locale" : "en_US"
             }
           ],
-          "productID" : "team_yearly",
+          "productID" : "com.developingbaseball.arsenaliq.team.yearly",
           "recurringSubscriptionPeriod" : "P1Y",
-          "referenceName" : "Team Yearly",
-          "subscriptionGroupID" : "livedata_pro_group",
+          "referenceName" : "Arsenal IQ Team Yearly",
+          "subscriptionGroupID" : "arsenal_iq_pro_group",
           "type" : "RecurringSubscription"
         }
       ]

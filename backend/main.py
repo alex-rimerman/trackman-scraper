@@ -572,9 +572,11 @@ def _plan_from_product_id(product_id: str) -> Optional[str]:
     if not product_id:
         return None
     pid = (product_id or "").strip().lower()
-    if pid == "123" or "personal" in pid:
+    # Legacy IDs ("123", "125", "personal_yearly", "team_yearly") preserved for any
+    # in-flight TestFlight subscriptions; new IDs are reverse-DNS namespaced.
+    if "personal" in pid or pid == "123":
         return "personal"
-    if pid in ("124", "125") or "team" in pid:
+    if "team" in pid or pid in ("124", "125"):
         return "team"
     return None
 

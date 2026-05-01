@@ -104,7 +104,7 @@ To test purchases locally without App Store Connect:
 1. In Xcode: **Product** → **Scheme** → **Edit Scheme**
 2. Select **Run** → **Options**
 3. Under **StoreKit Configuration**, choose `SubscriptionConfiguration.storekit` (in `LiveDataApp/`)
-4. Run the app in the simulator. "Test Purchase" will show products **123** ($4.99) and **125** ($29.99).
+4. Run the app in the simulator. StoreKit will offer the four `com.developingbaseball.arsenaliq.*` subscriptions (see `LiveDataApp/SubscriptionConfiguration.storekit`).
 5. **Important:** RevenueCat may still require products in App Store Connect for production. The StoreKit config is for local simulator testing only.
 
 ### Rate Limiting (TODO)

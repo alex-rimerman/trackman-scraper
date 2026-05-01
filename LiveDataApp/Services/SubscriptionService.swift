@@ -7,6 +7,39 @@ enum SubscriptionBillingPeriod: String, CaseIterable {
     case yearly
 }
 
+/// Legal URLs and disclosures shown on every paywall.
+/// Apple's App Review requires functional links to BOTH a privacy policy and a
+/// Terms of Use (EULA) to appear in the purchase flow itself (Guideline 3.1.2(c)).
+enum LegalURLs {
+    /// Privacy Policy. Must remain publicly reachable.
+    static let privacyPolicy = URL(string: "https://developingbaseball.com/privacy")!
+    /// Terms of Use / EULA. Must remain publicly reachable. If you ever switch to
+    /// Apple's Standard EULA, change this to:
+    /// https://www.apple.com/legal/internet-services/itunes/dev/stdeula/
+    static let termsOfUse = URL(string: "https://developingbaseball.com/terms")!
+
+    /// Verbatim auto-renew disclosure required by Apple on every paywall.
+    static let autoRenewDisclosure = "Subscriptions auto-renew at the price above unless canceled at least 24 hours before the end of the current period. Payment is charged to your Apple ID at confirmation of purchase. Manage or cancel anytime in your App Store account settings."
+}
+
+/// Marketing-facing title for a subscription tier (must match the IAP "Display Name" in App Store Connect).
+enum SubscriptionTitle {
+    static func title(accountType: String, period: SubscriptionBillingPeriod) -> String {
+        let tier = accountType == "team" ? "Arsenal IQ Team" : "Arsenal IQ Personal"
+        return "\(tier) \(period == .yearly ? "Yearly" : "Monthly")"
+    }
+
+    /// Short feature list. Keep concise — Apple wants a clear description of what
+    /// the user receives for the price (Guideline 3.1.2(c)).
+    static let features: [String] = [
+        "Unlimited Trackman pitch capture (camera + PDF import)",
+        "Stuff+ grades powered by our 2020–2025 pitch model",
+        "Pitch metric breakdowns: velocity, IVB, HB, spin, axis, release",
+        "Saved pitcher profiles with per-pitch averages and trends",
+        "Color-coded league percentile reports"
+    ]
+}
+
 /// RevenueCat-backed subscription service for in-app purchases.
 final class SubscriptionService {
 
@@ -24,12 +57,13 @@ final class SubscriptionService {
     }
 
     /// App Store product identifiers. These must match Product IDs in App Store Connect
-    /// (and the products in RevenueCat). The monthly IDs are legacy ("123" / "125").
+    /// (and the products in RevenueCat). All four live in the single subscription group
+    /// "Arsenal IQ Pro" so users can crossgrade between durations.
     enum ProductID {
-        static let personalMonthly = "123"
-        static let personalAnnual = "personal_yearly"
-        static let teamMonthly = "125"
-        static let teamAnnual = "team_yearly"
+        static let personalMonthly = "com.developingbaseball.arsenaliq.personal.monthly"
+        static let personalAnnual = "com.developingbaseball.arsenaliq.personal.yearly"
+        static let teamMonthly = "com.developingbaseball.arsenaliq.team.monthly"
+        static let teamAnnual = "com.developingbaseball.arsenaliq.team.yearly"
     }
 
     static func productId(accountType: String, period: SubscriptionBillingPeriod) -> String {
